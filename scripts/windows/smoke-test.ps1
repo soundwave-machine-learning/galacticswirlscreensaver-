@@ -224,7 +224,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
   Check ($uniq.Count -eq 0) "$label`: no network sockets opened by the app or its WebView2 processes $(if ($uniq.Count) { '-> ' + ($uniq -join '; ') })"
   if (-not $proc.HasExited) {
     # What the user experiences is the screen being handed back: the app hides
-    # its windows the moment input is detected, then exits (2 s watchdog).
+    # its windows the moment input is detected, then exits (1 s watchdog).
     $proc.Refresh()
     $hadWindow = $proc.MainWindowHandle -ne [IntPtr]::Zero
     $moves = @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))
@@ -256,7 +256,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     } else {
       Check $false "$label`: screen handed back (window never hid)"
     }
-    if ($ok) { Check ($secs -le 6) "$label`: process gone within 6 s of the input (2 s watchdog + teardown; took $secs s)" }
+    if ($ok) { Check ($secs -le 3) "$label`: process gone within 3 s of the input (detection + 1 s watchdog; took $secs s)" }
   }
   if (-not $proc.HasExited) { Stop-Process -Id $proc.Id }
   Test-Drained $tree $label

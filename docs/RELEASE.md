@@ -129,7 +129,7 @@ that build's own `SHA256SUMS.txt`.)
    file name "SoundwavianField".
 3. **Dismissal reliability.** One CI run caught a first-launch case where the screensaver was still running 8 s
    after the mouse moved. Now the windows hide the instant dismissal is detected, a native last-input/cursor check
-   dismisses even if the page stops responding, and a 2 s watchdog guarantees the process ends.
+   dismisses even if the page stops responding, and a watchdog guarantees the process ends (now 1 s, armed first; see the hardening log below).
 4. The smoke test's process-tree walk was confused by Windows PID reuse, reporting system processes as leftovers.
    Fixed with a creation-time check.
 

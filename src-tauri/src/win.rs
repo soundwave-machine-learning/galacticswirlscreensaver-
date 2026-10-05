@@ -11,8 +11,8 @@ use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_S
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SystemParametersInfoW,
-    SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETSCREENSAVEACTIVE,
+    GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, ShowWindowAsync,
+    SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETSCREENSAVEACTIVE, SW_HIDE,
 };
 
 pub fn hwnd(raw: isize) -> HWND {
@@ -38,6 +38,13 @@ pub fn foreground_is_ours() -> bool {
         let mut pid = 0u32;
         GetWindowThreadProcessId(fg, Some(&mut pid));
         pid == std::process::id()
+    }
+}
+
+/// Hides a window without waiting for its thread (posts the request).
+pub fn hide_async(raw: isize) {
+    unsafe {
+        let _ = ShowWindowAsync(hwnd(raw), SW_HIDE);
     }
 }
 

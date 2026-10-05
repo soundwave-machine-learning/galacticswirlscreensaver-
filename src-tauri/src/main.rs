@@ -39,8 +39,13 @@ const SCR_NAME: &str = "SoundwavianField.scr";
 #[cfg(windows)]
 const EXIT_FOCUS_LOST: i32 = 2;
 
-/// Longest a dismissed window may take to shut down cleanly.
-const EXIT_GRACE: Duration = Duration::from_millis(2000);
+/// Longest a dismissed program may take to shut down cleanly before the
+/// watchdog ends the process.
+const EXIT_GRACE: Duration = Duration::from_millis(1000);
+
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static WINDOW_HANDLES: std::sync::Mutex<Vec<isize>> = std::sync::Mutex::new(Vec::new());
 
 static MODE: OnceLock<Mode> = OnceLock::new();
 static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
@@ -68,21 +73,41 @@ fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
     settings::save(&config_dir(&app)?, &json)
 }
 
-/// Ends the program. The windows are hidden first so the screen is handed
-/// back to the user immediately; then the normal shutdown runs. WebView2
-/// teardown can occasionally take seconds on a cold start, so a watchdog
-/// ends the process if it has not exited after `EXIT_GRACE`. (The WebView2
-/// helper processes notice and close themselves.)
+/// Ends the program. Order matters, and every step is non-blocking:
+///  1. Only the first caller proceeds (input can be detected by the page and
+///     by the native watcher at the same moment).
+///  2. The watchdog is armed before anything else, so the process is gone
+///     within `EXIT_GRACE` even if WebView2 teardown or the UI thread stalls.
+///  3. Windows are hidden with ShowWindowAsync on handles recorded at
+///     creation, which never waits on the UI thread, so the screen is handed
+///     back at once.
+///  4. The normal shutdown runs; the WebView2 helper processes notice the
+///     host is gone and close themselves.
 fn shut_down(app: &AppHandle, code: i32) {
-    for window in app.webview_windows().values() {
-        let _ = window.hide();
+    if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
+        return;
     }
     std::thread::spawn(move || {
         std::thread::sleep(EXIT_GRACE);
         std::process::exit(code);
     });
+    #[cfg(windows)]
+    for raw in WINDOW_HANDLES.lock().map(|v| v.clone()).unwrap_or_default() {
+        win::hide_async(raw);
+    }
     app.exit(code);
 }
+
+/// Records a window's native handle so shutdown can hide it without going
+/// through the UI thread.
+#[cfg(windows)]
+fn remember(window: &tauri::WebviewWindow) {
+    if let (Ok(h), Ok(mut list)) = (window.hwnd(), WINDOW_HANDLES.lock()) {
+        list.push(h.0 as isize);
+    }
+}
+#[cfg(not(windows))]
+fn remember(_window: &tauri::WebviewWindow) {}
 
 #[tauri::command]
 fn exit_app(app: AppHandle) {
@@ -145,13 +170,14 @@ fn base_builder<'a>(app: &'a AppHandle, label: &'a str, query: &str) -> WebviewW
 }
 
 fn open_app(app: &AppHandle) -> tauri::Result<()> {
-    base_builder(app, "main", "mode=app")
+    let window = base_builder(app, "main", "mode=app")
         .inner_size(1280.0, 800.0)
         .min_inner_size(480.0, 320.0)
         .center()
         .fullscreen(true)
         .focused(true)
         .build()?;
+    remember(&window);
     Ok(())
 }
 
@@ -169,7 +195,8 @@ fn open_config(app: &AppHandle, owner: Option<isize>) -> tauri::Result<()> {
     }
     #[cfg(not(windows))]
     let _ = owner;
-    builder.build()?;
+    let window = builder.build()?;
+    remember(&window);
     Ok(())
 }
 
@@ -198,6 +225,7 @@ fn open_screensaver(app: &AppHandle) -> tauri::Result<()> {
             .visible(false)
             .focused(i == 0)
             .build()?;
+        remember(&window);
         let pos: PhysicalPosition<i32> = *m.position();
         let size: PhysicalSize<u32> = *m.size();
         window.set_position(pos)?;
@@ -255,6 +283,7 @@ fn open_preview(app: &AppHandle, parent: isize) -> tauri::Result<()> {
         .focused(false)
         .visible(false)
         .build()?;
+    remember(&window);
     window.set_position(PhysicalPosition::new(0, 0))?;
     window.set_size(PhysicalSize::new(w, h))?;
     window.show()?;
