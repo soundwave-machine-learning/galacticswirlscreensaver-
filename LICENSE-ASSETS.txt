@@ -1,0 +1,11 @@
+Soundwavian Field // Galactic Mandala - bundled assets
+
+Galactic_Swirl_1.png, Galactic_Swirl_2.png, Galactic_Swirl_3.png and the
+application icon derived from them are supplied by the publisher and are
+included in this application for display only. All rights reserved by
+their owner. They may not be extracted or redistributed separately.
+
+Third-party code:
+- three.js (MIT License) - https://github.com/mrdoob/three.js
+- Tauri (MIT / Apache-2.0) - https://github.com/tauri-apps/tauri
+- webgl-noise simplex noise by Ashima Arts / Stefan Gustavson (MIT)

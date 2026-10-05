@@ -1,4 +1,4 @@
-import { readLaunchInfo, toggleFullscreen, setFullscreen, isFullscreen, exitApp } from './platform/host';
+import { readLaunchInfo, isDesktopApp, toggleFullscreen, setFullscreen, isFullscreen, exitApp } from './platform/host';
 import { Scene } from './renderer/Scene';
 import { AdaptiveQuality, suggestQuality } from './renderer/Quality';
 import { TextureField } from './systems/TextureField';
@@ -116,7 +116,7 @@ export async function boot() {
           retarget();
           persist();
         },
-        ...(launch.mode === 'config'
+        ...(launch.mode === 'config' || isDesktopApp
           ? {
               onDisplays: (v: Settings['displays']) => {
                 settings.displays = v;
@@ -145,14 +145,18 @@ export async function boot() {
                 panel?.sync(settings);
                 persist();
               },
-              onClose: async () => {
-                await saveSettings(settings, true);
-                await exitApp();
-              },
+              ...(launch.mode === 'config'
+                ? {
+                    onClose: async () => {
+                      await saveSettings(settings, true);
+                      await exitApp();
+                    },
+                  }
+                : {}),
             }
           : {}),
       },
-      { configMode: launch.mode === 'config' },
+      { configMode: launch.mode === 'config', windowsSection: launch.mode === 'config' || isDesktopApp },
     );
     panel.sync(settings);
   }

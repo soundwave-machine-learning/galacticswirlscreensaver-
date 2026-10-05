@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "../dist/stage/SoundwavianField.scr": "SoundwavianField.scr",
+      "../LICENSE-ASSETS.txt": "LICENSE-ASSETS.txt"
+    }
+  }
+}

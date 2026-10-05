@@ -1,6 +1,6 @@
 // 3D simplex noise.
 // Based on "webgl-noise" by Ashima Arts / Stefan Gustavson (MIT license),
-// https://github.com/ashima/webgl-noise - inlined here so nothing is fetched.
+// (ashima/webgl-noise) - inlined so nothing is ever fetched.
 
 vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }

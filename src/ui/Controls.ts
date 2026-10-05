@@ -73,7 +73,7 @@ export class ControlsPanel {
   constructor(
     host: HTMLElement,
     private readonly handlers: ControlHandlers,
-    private readonly opts: { configMode: boolean },
+    private readonly opts: { configMode: boolean; windowsSection: boolean },
   ) {
     this.root = el('div', { class: `ui ${opts.configMode ? 'config visible' : ''}`, 'aria-label': 'Field controls' });
     this.root.append(this.build());
@@ -194,7 +194,7 @@ export class ControlsPanel {
     );
     panel.append(options);
 
-    if (this.opts.configMode) panel.append(this.buildWindowsSection());
+    if (this.opts.windowsSection) panel.append(this.buildWindowsSection());
 
     this.message = el('div', { class: 'message', role: 'status' });
     this.status = el('div', { class: 'status' });

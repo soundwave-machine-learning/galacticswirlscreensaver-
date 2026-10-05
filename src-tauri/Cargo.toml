@@ -1,0 +1,48 @@
+[package]
+name = "soundwavian-field"
+version = "0.1.0"
+description = "Soundwavian Field // Galactic Mandala - meditative generative screensaver"
+authors = ["Soundwavian Field"]
+license = "LicenseRef-Proprietary"
+edition = "2021"
+rust-version = "1.77"
+publish = false
+
+[[bin]]
+# Stable, space-free binary name. The installer ships this exact file as
+# SoundwavianField.exe (app) and a byte-identical SoundwavianField.scr.
+name = "SoundwavianField"
+path = "src/main.rs"
+
+# Extra Windows version-info strings (tauri-build sets ProductName,
+# FileDescription, CompanyName, LegalCopyright and versions from
+# tauri.conf.json).
+[package.metadata.tauri-winres]
+OriginalFilename = "SoundwavianField.exe"
+InternalName = "SoundwavianField"
+Comments = "Offline generative screensaver. Makes no network connections."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+# Same major version tauri uses, so HWND types are shared.
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Registry",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+# Plain, conventional optimisation. No packers, no stripping tricks that
+# make binaries look unusual; symbols are split out by the MSVC linker.
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"

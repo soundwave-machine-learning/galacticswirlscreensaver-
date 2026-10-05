@@ -1,0 +1,47 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Soundwavian Field",
+  "mainBinaryName": "SoundwavianField",
+  "version": "0.1.0",
+  "identifier": "com.soundwavian.field",
+  "build": {
+    "frontendDist": "../dist/web",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ipc: http://ipc.localhost; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'",
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "publisher": "Soundwavian Field Publisher (placeholder)",
+    "copyright": "Copyright (c) 2026 Soundwavian Field Publisher (placeholder). All rights reserved.",
+    "category": "Entertainment",
+    "shortDescription": "Meditative generative screensaver",
+    "longDescription": "Soundwavian Field // Galactic Mandala: a slowly living cosmic painting with a hidden celestial geometry. Runs fully offline.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "certificateThumbprint": null,
+      "timestampUrl": null,
+      "allowDowngrades": false,
+      "webviewInstallMode": { "type": "skip" },
+      "wix": {
+        "language": "en-US",
+        "upgradeCode": "f9049658-7c7b-5ad7-af92-f1a0f32953e9"
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "displayLanguageSelector": false,
+        "installerHooks": "./windows/nsis-hooks.nsh"
+      }
+    }
+  }
+}

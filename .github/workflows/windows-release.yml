@@ -1,0 +1,101 @@
+name: Windows build
+
+# Builds the web bundle on Linux and the Windows installers on a clean
+# windows-latest runner, then installs, exercises and uninstalls them.
+# Unsigned (DEVELOPMENT) by default. A SIGNED RELEASE build runs only when
+# dispatched manually with `signed: true` and signing secrets configured.
+
+on:
+  push:
+    branches: [main, 'claude/**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: 'Sign with the configured code-signing certificate'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build # type-check + Vite build + offline audit
+
+  windows:
+    runs-on: windows-latest
+    needs: web
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - run: npm ci
+
+      - name: Prepare signing certificate
+        if: ${{ inputs.signed }}
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.SFIELD_SIGN_PFX_BASE64 }}
+        run: |
+          if (-not $env:PFX_BASE64) { throw 'signed=true but secret SFIELD_SIGN_PFX_BASE64 is not configured' }
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64))
+          "SFIELD_SIGN_PFX=$pfx" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build release artifacts
+        shell: pwsh
+        env:
+          SFIELD_SIGN_PFX_PASSWORD: ${{ secrets.SFIELD_SIGN_PFX_PASSWORD }}
+          SFIELD_TIMESTAMP_URL: ${{ vars.SFIELD_TIMESTAMP_URL }}
+        run: |
+          if ('${{ inputs.signed }}' -eq 'true') { node scripts/release.mjs --signed } else { node scripts/release.mjs }
+
+      - name: Static inspection (MSI tables, payload, signatures)
+        shell: pwsh
+        run: ./scripts/windows/inspect-release.ps1
+
+      - name: Install / run / uninstall smoke test (MSI)
+        shell: pwsh
+        run: ./scripts/windows/smoke-test.ps1 -Installer (Get-ChildItem dist/release/*.msi).FullName
+
+      - name: Install / run / uninstall smoke test (EXE installer)
+        shell: pwsh
+        run: ./scripts/windows/smoke-test.ps1 -Installer (Get-ChildItem dist/release/*-setup.exe).FullName
+
+      - name: Remove signing certificate
+        if: ${{ always() && inputs.signed }}
+        shell: pwsh
+        run: Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'codesign.pfx')
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soundwavian-field-windows
+          path: dist/release/
+          if-no-files-found: warn

@@ -1,0 +1,177 @@
+<#
+.SYNOPSIS
+  Install / run / uninstall smoke test for Soundwavian Field on Windows.
+
+.DESCRIPTION
+  Intended for a clean Windows 10/11 VM (and run automatically on the CI
+  runner). Must be run from an elevated PowerShell because the installers
+  are per-machine (Program Files).
+
+  Checks:
+    - silent install succeeds; files land in Program Files
+    - no services, scheduled tasks, Run/RunOnce values or Startup-folder
+      items are added
+    - the .scr honours /a and /p <invalid HWND> by exiting immediately
+    - /s starts, makes no network connections, and leaves no processes
+      behind once the main process ends
+    - uninstall succeeds and removes the files and shortcuts
+
+  The report is written next to the installer as smoke-test-<kind>.txt.
+
+.EXAMPLE
+  pwsh -File scripts\windows\smoke-test.ps1 -Installer dist\release\SoundwavianField-0.1.0-x64.msi
+#>
+param(
+  [Parameter(Mandatory)] [string] $Installer,
+  [int] $RunSeconds = 15
+)
+
+$ErrorActionPreference = 'Stop'
+$Installer = (Resolve-Path $Installer).Path
+$kind = if ($Installer -like '*.msi') { 'msi' } else { 'nsis' }
+$report = Join-Path (Split-Path $Installer) "smoke-test-$kind.txt"
+$lines = [System.Collections.Generic.List[string]]::new()
+$failures = 0
+function Log([string] $m) { Write-Host $m; $lines.Add($m) }
+function Check([bool] $ok, [string] $m) {
+  if ($ok) { Log "  PASS  $m" } else { Log "  FAIL  $m"; $script:failures++ }
+}
+
+$installDir = Join-Path $env:ProgramFiles 'Soundwavian Field'
+$exe = Join-Path $installDir 'SoundwavianField.exe'
+$scr = Join-Path $installDir 'SoundwavianField.scr'
+
+function Get-PersistenceSnapshot {
+  $runKeys = @(
+    'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+    'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+    'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+    'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+  )
+  $run = foreach ($k in $runKeys) {
+    if (Test-Path $k) {
+      (Get-Item $k).Property | ForEach-Object { "$k\$_" }
+    }
+  }
+  $startupDirs = @(
+    [Environment]::GetFolderPath('Startup'),
+    [Environment]::GetFolderPath('CommonStartup')
+  )
+  [pscustomobject]@{
+    Services = @(Get-Service | ForEach-Object Name)
+    Tasks    = @(Get-ScheduledTask | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" })
+    Run      = @($run)
+    Startup  = @($startupDirs | Where-Object { $_ -and (Test-Path $_) } | ForEach-Object { Get-ChildItem $_ -Force } | ForEach-Object FullName)
+  }
+}
+
+function Compare-Set($before, $after) { @($after | Where-Object { $before -notcontains $_ }) }
+
+function Get-ProcessTree([int] $rootId) {
+  $all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine
+  $ids = [System.Collections.Generic.HashSet[int]]::new()
+  [void] $ids.Add($rootId)
+  do {
+    $added = $false
+    foreach ($p in $all) {
+      if ($ids.Contains([int]$p.ParentProcessId) -and -not $ids.Contains([int]$p.ProcessId)) {
+        [void] $ids.Add([int]$p.ProcessId); $added = $true
+      }
+    }
+  } while ($added)
+  $all | Where-Object { $ids.Contains([int]$_.ProcessId) }
+}
+
+Log "Soundwavian Field smoke test - $kind - $(Get-Date -Format o)"
+Log "Installer: $Installer"
+Log "SHA-256:   $((Get-FileHash $Installer -Algorithm SHA256).Hash)"
+Log "OS:        $((Get-CimInstance Win32_OperatingSystem).Caption) $((Get-CimInstance Win32_OperatingSystem).Version)"
+$wv = Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue
+Log "WebView2:  $(if ($wv) { $wv.pv } else { 'not found in HKLM (may be per-user)' })"
+
+Log "`n[1] Install"
+$before = Get-PersistenceSnapshot
+if ($kind -eq 'msi') {
+  $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$Installer`"", '/qn', '/norestart', '/l*v', "`"$report.install.log`"") -Wait -PassThru
+} else {
+  $p = Start-Process $Installer -ArgumentList '/S' -Wait -PassThru
+}
+Check ($p.ExitCode -eq 0) "installer exit code $($p.ExitCode)"
+Check (Test-Path $exe) "app installed at $exe"
+Check (Test-Path $scr) "screen saver installed at $scr"
+
+Log "`n[2] Installed files"
+Get-ChildItem $installDir -Recurse -File | ForEach-Object {
+  $sig = Get-AuthenticodeSignature $_.FullName
+  $ver = $_.VersionInfo
+  Log ("  {0,-34} {1,10:N0} bytes  sig={2}  {3} {4}" -f $_.Name, $_.Length, $sig.Status, $ver.FileDescription, $ver.FileVersion)
+}
+$pe = Get-ChildItem $installDir -Recurse -File -Include *.exe, *.dll, *.scr, *.sys
+Log "  executables/DLLs: $($pe.Name -join ', ')"
+if (Test-Path $exe) {
+  $vi = (Get-Item $exe).VersionInfo
+  Log "  Version info: Product='$($vi.ProductName)' Company='$($vi.CompanyName)' Description='$($vi.FileDescription)' Original='$($vi.OriginalFilename)' Version=$($vi.FileVersion) Copyright='$($vi.LegalCopyright)'"
+  $same = (Get-FileHash $exe).Hash -eq (Get-FileHash $scr).Hash
+  Log "  exe/scr byte-identical: $same (a signed build may differ only in its signature block)"
+}
+
+Log "`n[3] Persistence after install"
+$after = Get-PersistenceSnapshot
+foreach ($kindName in 'Services', 'Tasks', 'Run', 'Startup') {
+  $new = Compare-Set $before.$kindName $after.$kindName
+  Check ($new.Count -eq 0) "no new $kindName $(if ($new.Count) { '-> ' + ($new -join '; ') })"
+}
+
+Log "`n[4] Screen saver argument handling"
+foreach ($a in @('/a', '/p 0', '/p 999999')) {
+  $proc = Start-Process $scr -ArgumentList $a -PassThru
+  $exited = $proc.WaitForExit(10000)
+  if (-not $exited) { Stop-Process -Id $proc.Id -Force }
+  Check $exited "'$a' exits on its own"
+}
+
+Log "`n[5] Full-screen run (/s) for $RunSeconds s"
+$proc = Start-Process $scr -ArgumentList '/s' -PassThru
+$conns = @()
+$tree = @()
+for ($i = 0; $i -lt $RunSeconds; $i++) {
+  Start-Sleep -Seconds 1
+  if ($proc.HasExited) { break }
+  $tree = @(Get-ProcessTree $proc.Id)
+  $ids = $tree.ProcessId
+  $conns += @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess -and $_.RemoteAddress -notin @('127.0.0.1', '::1', '0.0.0.0', '::') })
+  $conns += @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess -and $_.LocalAddress -notin @('127.0.0.1', '::1') })
+}
+Check (-not $proc.HasExited) "/s keeps running until dismissed (exit code: $(if ($proc.HasExited) { $proc.ExitCode } else { 'running' }))"
+Log "  process tree:"
+foreach ($t in $tree) { Log ("    {0,6} {1}" -f $t.ProcessId, $t.Name) }
+Check ($conns.Count -eq 0) "no network sockets opened by the app or its WebView2 processes $(if ($conns.Count) { '-> ' + (($conns | ForEach-Object { "$($_.OwningProcess) $($_.RemoteAddress):$($_.RemotePort)$($_.LocalPort)" }) -join '; ') })"
+
+# Ending the main process must take every child with it (no lingering processes).
+if (-not $proc.HasExited) { Stop-Process -Id $proc.Id }
+Start-Sleep -Seconds 6
+$left = @(Get-CimInstance Win32_Process | Where-Object { $tree.ProcessId -contains $_.ProcessId })
+Check ($left.Count -eq 0) "no processes remain after the screen saver ends $(if ($left.Count) { '-> ' + ($left.Name -join ', ') })"
+
+Log "`n[6] Uninstall"
+if ($kind -eq 'msi') {
+  $p = Start-Process msiexec.exe -ArgumentList @('/x', "`"$Installer`"", '/qn', '/norestart') -Wait -PassThru
+} else {
+  $p = Start-Process (Join-Path $installDir 'uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+  Start-Sleep -Seconds 5  # the NSIS uninstaller re-launches itself from a temp copy
+}
+Check ($p.ExitCode -eq 0) "uninstaller exit code $($p.ExitCode)"
+Check (-not (Test-Path $exe)) 'application files removed'
+$startMenu = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
+$shortcuts = @(Get-ChildItem $startMenu -Recurse -Filter '*Soundwavian*' -ErrorAction SilentlyContinue)
+Check ($shortcuts.Count -eq 0) "Start Menu entries removed $(if ($shortcuts.Count) { '-> ' + ($shortcuts.FullName -join '; ') })"
+$final = Get-PersistenceSnapshot
+foreach ($kindName in 'Services', 'Tasks', 'Run', 'Startup') {
+  $new = Compare-Set $before.$kindName $final.$kindName
+  Check ($new.Count -eq 0) "no leftover $kindName"
+}
+
+Log "`nResult: $(if ($failures) { "$failures check(s) FAILED" } else { 'all checks passed' })"
+$lines | Set-Content -Path $report -Encoding utf8
+if ($failures) { exit 1 }

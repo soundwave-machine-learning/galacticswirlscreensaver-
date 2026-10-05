@@ -11,8 +11,13 @@ if (launch.mode === 'screensaver') {
   installScreensaverGuard();
 }
 
-import('./app')
-  .then(({ boot, reportFatal }) => boot().catch(reportFatal))
-  .catch((err) => {
-    console.error(err);
-  });
+// Secondary monitors set to "primary display only" stay plain black.
+const blank = new URLSearchParams(location.search).has('blank');
+
+if (!blank) {
+  import('./app')
+    .then(({ boot, reportFatal }) => boot().catch(reportFatal))
+    .catch((err) => {
+      console.error(err);
+    });
+}
