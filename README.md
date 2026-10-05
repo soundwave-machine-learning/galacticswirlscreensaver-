@@ -68,7 +68,8 @@ also hides after ~3 s.
 | **R** | Randomize seed (fades out, re-seeds, fades in) |
 | **Escape** | Leave fullscreen |
 | **1–5** | Presets: Stillness, Orbit, Deep Field, Ascension, Void |
-| **D** | Stats overlay: fps, quality tier, per-preset avg/min fps, GPU, resolution, transition state |
+| **D** | Diagnostics overlay: fps, frame time, avg/min fps per preset, quality tier, particle counts, render/display resolution, DPR, GPU, OS, version |
+| **C** | Copy diagnostics as plain text to the clipboard (local only; nothing is sent anywhere) |
 
 Panel: **Intensity, Spiral, Matrix, Particles, Breathing, Transition Speed,
 Brightness** sliders (multipliers on top of the preset; 1.00 = as designed),

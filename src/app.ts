@@ -1,6 +1,7 @@
 import { readLaunchInfo, isDesktopApp, toggleFullscreen, setFullscreen, isFullscreen, exitApp } from './platform/host';
 import { Scene } from './renderer/Scene';
 import { AdaptiveQuality, describeGpu, suggestQuality } from './renderer/Quality';
+import { copyText, formatDiagnostics, initPlatform, type DiagnosticsData } from './ui/diagnostics';
 import { TextureField } from './systems/TextureField';
 import { ControlsPanel } from './ui/Controls';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './platform/settings';
@@ -106,6 +107,7 @@ export async function boot() {
         onNext: () => scene.nextField(),
         onFullscreen: () => void toggleFullscreen(),
         onRandomize: () => scene.reseed(randomSeed()),
+        onCopyDiagnostics: () => void copyDiagnostics(),
         onToggleMatrix: (on) => {
           settings.matrix = on;
           retarget();
@@ -161,6 +163,56 @@ export async function boot() {
     panel.sync(settings);
   }
 
+  // Frame meter for the D overlay (release testing): average fps and the
+  // lowest 2-second average since the preset last changed. The first 5 s
+  // after a change are ignored (shader warm-up, parameter easing).
+  const gpu = describeGpu(scene.renderer);
+  const meter = { preset: settings.preset, time: 0, frames: 0, winTime: 0, winFrames: 0, min: Infinity };
+  const measure = (dt: number) => {
+    if (meter.preset !== settings.preset) {
+      Object.assign(meter, { preset: settings.preset, time: 0, frames: 0, winTime: 0, winFrames: 0, min: Infinity });
+    }
+    meter.time += dt;
+    if (meter.time < 5 || dt <= 0) return;
+    meter.frames++;
+    meter.winTime += dt;
+    meter.winFrames++;
+    if (meter.winTime >= 2) {
+      meter.min = Math.min(meter.min, meter.winFrames / meter.winTime);
+      meter.winTime = 0;
+      meter.winFrames = 0;
+    }
+  };
+
+  initPlatform();
+  const diagnostics = (): DiagnosticsData => {
+    const d = scene.debug;
+    const measured = meter.time - 5;
+    return {
+      preset: getPreset(settings.preset).label,
+      fps: quality.fps,
+      avgFps: measured > 0 && meter.frames > 0 ? meter.frames / measured : null,
+      minFps: Number.isFinite(meter.min) ? meter.min : null,
+      measuredSeconds: measured,
+      quality: d.quality,
+      qualityAuto: quality.isAuto,
+      particles: d.particles,
+      render: d.size,
+      gpu,
+      seed: d.seed,
+      field: scene.fieldName,
+    };
+  };
+  let copiedUntil = 0;
+  let copiedOk = true;
+  // Local clipboard only - never transmitted anywhere.
+  const copyDiagnostics = async () => {
+    const ok = await copyText(formatDiagnostics(diagnostics()));
+    copiedUntil = performance.now() + 3000;
+    copiedOk = ok;
+    panel?.flash(ok ? 'Diagnostics copied to the clipboard.' : 'Could not access the clipboard.');
+  };
+
   // ---- keyboard (app mode) ----
   const stats = document.createElement('div');
   stats.id = 'stats';
@@ -208,6 +260,10 @@ export async function boot() {
         case 'D':
           stats.classList.toggle('on');
           break;
+        case 'c':
+        case 'C':
+          void copyDiagnostics();
+          break;
         default: {
           const n = Number(e.key);
           if (n >= 1 && n <= PRESETS.length) {
@@ -238,27 +294,6 @@ export async function boot() {
   }
 
   // ---- main loop ----
-  // Frame meter for the D overlay (release testing): average fps and the
-  // lowest 2-second average since the preset last changed. The first 5 s
-  // after a change are ignored (shader warm-up, parameter easing).
-  const gpu = describeGpu(scene.renderer);
-  const meter = { preset: settings.preset, time: 0, frames: 0, winTime: 0, winFrames: 0, min: Infinity };
-  const measure = (dt: number) => {
-    if (meter.preset !== settings.preset) {
-      Object.assign(meter, { preset: settings.preset, time: 0, frames: 0, winTime: 0, winFrames: 0, min: Infinity });
-    }
-    meter.time += dt;
-    if (meter.time < 5 || dt <= 0) return;
-    meter.frames++;
-    meter.winTime += dt;
-    meter.winFrames++;
-    if (meter.winTime >= 2) {
-      meter.min = Math.min(meter.min, meter.winFrames / meter.winTime);
-      meter.winTime = 0;
-      meter.winFrames = 0;
-    }
-  };
-
   let last = performance.now();
   let statsTimer = 0;
   const frame = (now: number) => {
@@ -283,18 +318,12 @@ export async function boot() {
       });
       if (stats.classList.contains('on')) {
         const d = scene.debug;
-        const measured = meter.time - 5;
-        const avg = measured > 0 && meter.frames > 0 ? (meter.frames / measured).toFixed(1) : '…';
-        const min = Number.isFinite(meter.min) ? meter.min.toFixed(1) : '…';
+        const copied = performance.now() < copiedUntil ? (copiedOk ? '   ✓ copied' : '   ✗ clipboard unavailable') : '';
         stats.textContent =
-          `${quality.fps.toFixed(1)} fps   ${d.quality}${quality.isAuto ? ' auto' : ''}\n` +
-          `${getPreset(settings.preset).label}: avg ${avg}  min ${min}  over ${Math.max(0, measured).toFixed(0)}s\n` +
-          `gpu ${gpu}\n` +
-          `screen ${window.screen.width}×${window.screen.height} @${(window.devicePixelRatio || 1).toFixed(2)}x  ` +
-          `scene ${d.size.width}×${d.size.height}\n` +
-          `field ${d.field} → ${d.next}  ${d.phase}  mix ${d.mix.toFixed(3)}\n` +
-          `emergence ${d.emergence.toFixed(3)}  next in ${d.timeToNext.toFixed(0)}s\n` +
-          `links ${d.links}   seed ${d.seed}${paused ? '   PAUSED' : ''}`;
+          formatDiagnostics(diagnostics()) +
+          `\nTransition: ${d.field} → ${d.next} ${d.phase} · mix ${d.mix.toFixed(3)} · next in ${d.timeToNext.toFixed(0)} s` +
+          `\nLinks: ${d.links}${paused ? '   PAUSED' : ''}` +
+          `\n\nD hide · C copy diagnostics${copied}`;
       }
     }
     requestAnimationFrame(frame);

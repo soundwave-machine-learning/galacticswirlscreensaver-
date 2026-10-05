@@ -155,6 +155,14 @@ export class Scene {
       phase: this.transitions.state,
       timeToNext: this.transitions.timeToNext,
       size: this.post.size,
+      particles: {
+        stars: QUALITY[this.quality].stars,
+        dust: QUALITY[this.quality].dust,
+        nodes: QUALITY[this.quality].nodes,
+        starDensity: this.params.stars,
+        dustDensity: this.params.dust,
+        nodeDensity: this.params.nodes,
+      },
     };
   }
 

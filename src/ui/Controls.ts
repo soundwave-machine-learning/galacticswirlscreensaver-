@@ -15,6 +15,7 @@ export interface ControlHandlers {
   onNext(): void;
   onFullscreen(): void;
   onRandomize(): void;
+  onCopyDiagnostics(): void;
   onToggleMatrix(on: boolean): void;
   onToggleParticles(on: boolean): void;
   // Screensaver configuration window only
@@ -159,6 +160,9 @@ export class ControlsPanel {
     button('Next Field', 'Begin the next transition  [→]', () => h.onNext());
     if (!this.opts.configMode) button('Fullscreen', 'Toggle fullscreen  [F]', () => h.onFullscreen());
     button('Randomize Seed', 'New particle, geometry and timing seed  [R]', () => h.onRandomize());
+    button('Copy Diagnostics', 'Copy fps, quality, GPU and version as text to your clipboard (stays on this PC)  [C]', () =>
+      h.onCopyDiagnostics(),
+    );
     panel.append(actions);
 
     const options = el('div', { class: 'options' });
