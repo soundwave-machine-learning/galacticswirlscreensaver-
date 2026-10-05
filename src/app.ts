@@ -1,6 +1,6 @@
 import { readLaunchInfo, isDesktopApp, toggleFullscreen, setFullscreen, isFullscreen, exitApp } from './platform/host';
 import { Scene } from './renderer/Scene';
-import { AdaptiveQuality, suggestQuality } from './renderer/Quality';
+import { AdaptiveQuality, describeGpu, suggestQuality } from './renderer/Quality';
 import { TextureField } from './systems/TextureField';
 import { ControlsPanel } from './ui/Controls';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './platform/settings';
@@ -238,12 +238,34 @@ export async function boot() {
   }
 
   // ---- main loop ----
+  // Frame meter for the D overlay (release testing): average fps and the
+  // lowest 2-second average since the preset last changed. The first 5 s
+  // after a change are ignored (shader warm-up, parameter easing).
+  const gpu = describeGpu(scene.renderer);
+  const meter = { preset: settings.preset, time: 0, frames: 0, winTime: 0, winFrames: 0, min: Infinity };
+  const measure = (dt: number) => {
+    if (meter.preset !== settings.preset) {
+      Object.assign(meter, { preset: settings.preset, time: 0, frames: 0, winTime: 0, winFrames: 0, min: Infinity });
+    }
+    meter.time += dt;
+    if (meter.time < 5 || dt <= 0) return;
+    meter.frames++;
+    meter.winTime += dt;
+    meter.winFrames++;
+    if (meter.winTime >= 2) {
+      meter.min = Math.min(meter.min, meter.winFrames / meter.winTime);
+      meter.winTime = 0;
+      meter.winFrames = 0;
+    }
+  };
+
   let last = performance.now();
   let statsTimer = 0;
   const frame = (now: number) => {
     const realDt = Math.min(0.1, Math.max(0, (now - last) / 1000));
     last = now;
     quality.sample(realDt);
+    measure(realDt);
 
     scene.transitionSpeed = settings.controls.transitionSpeed;
     scene.update(paused ? 0 : realDt, realDt);
@@ -261,8 +283,14 @@ export async function boot() {
       });
       if (stats.classList.contains('on')) {
         const d = scene.debug;
+        const measured = meter.time - 5;
+        const avg = measured > 0 && meter.frames > 0 ? (meter.frames / measured).toFixed(1) : '…';
+        const min = Number.isFinite(meter.min) ? meter.min.toFixed(1) : '…';
         stats.textContent =
           `${quality.fps.toFixed(1)} fps   ${d.quality}${quality.isAuto ? ' auto' : ''}\n` +
+          `${getPreset(settings.preset).label}: avg ${avg}  min ${min}  over ${Math.max(0, measured).toFixed(0)}s\n` +
+          `gpu ${gpu}\n` +
+          `screen ${window.screen.width}×${window.screen.height} @${(window.devicePixelRatio || 1).toFixed(2)}x  ` +
           `scene ${d.size.width}×${d.size.height}\n` +
           `field ${d.field} → ${d.next}  ${d.phase}  mix ${d.mix.toFixed(3)}\n` +
           `emergence ${d.emergence.toFixed(3)}  next in ${d.timeToNext.toFixed(0)}s\n` +

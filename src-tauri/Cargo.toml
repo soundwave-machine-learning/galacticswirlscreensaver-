@@ -1,8 +1,8 @@
 [package]
 name = "soundwavian-field"
 version = "0.1.0"
-description = "Soundwavian Field // Galactic Mandala - meditative generative screensaver"
-authors = ["Soundwavian Field"]
+description = "Soundwavian Field — Galactic Mandala Screensaver"
+authors = ["Soundwave Machine Learning"]
 license = "LicenseRef-Proprietary"
 edition = "2021"
 rust-version = "1.77"
@@ -14,13 +14,14 @@ publish = false
 name = "SoundwavianField"
 path = "src/main.rs"
 
-# Extra Windows version-info strings (tauri-build sets ProductName,
-# FileDescription, CompanyName, LegalCopyright and versions from
-# tauri.conf.json).
+# Extra Windows version-info strings. tauri-build sets ProductName,
+# CompanyName, LegalCopyright and versions from tauri.conf.json, and always
+# sets FileDescription to the product name ("Soundwavian Field" - also what
+# Task Manager shows), so the long description lives in Comments.
 [package.metadata.tauri-winres]
 OriginalFilename = "SoundwavianField.exe"
 InternalName = "SoundwavianField"
-Comments = "Offline generative screensaver. Makes no network connections."
+Comments = "Soundwavian Field — Galactic Mandala Screensaver. Runs offline; makes no network connections."
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

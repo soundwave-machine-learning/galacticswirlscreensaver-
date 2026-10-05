@@ -142,6 +142,23 @@ Log "  executables/DLLs: $($pe.Name -join ', ')"
 if (Test-Path $exe) {
   $vi = (Get-Item $exe).VersionInfo
   Log "  Version info: Product='$($vi.ProductName)' Company='$($vi.CompanyName)' Description='$($vi.FileDescription)' Original='$($vi.OriginalFilename)' Version=$($vi.FileVersion) Copyright='$($vi.LegalCopyright)'"
+  $expectedCompany = if ($env:SFIELD_PUBLISHER) { $env:SFIELD_PUBLISHER } else { 'Soundwave Machine Learning' }
+  Check ($vi.CompanyName -eq $expectedCompany) "CompanyName is '$expectedCompany'"
+  Check ($vi.CompanyName -notmatch 'placeholder' -and $vi.LegalCopyright -notmatch 'placeholder') 'no placeholder publisher text in version info'
+  # The Screen Saver Settings dialog lists a .scr by its string resource 1.
+  Add-Type -Namespace SField -Name Res -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern System.IntPtr LoadLibraryExW(string path, System.IntPtr file, uint flags);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+public static extern int LoadStringW(System.IntPtr module, uint id, System.Text.StringBuilder buffer, int max);
+[DllImport("kernel32.dll")]
+public static extern bool FreeLibrary(System.IntPtr module);
+'@ -ErrorAction SilentlyContinue
+  $mod = [SField.Res]::LoadLibraryExW($scr, [IntPtr]::Zero, 0x22)  # DATAFILE | IMAGE_RESOURCE
+  $sb = [System.Text.StringBuilder]::new(256)
+  $n = if ($mod -ne [IntPtr]::Zero) { [SField.Res]::LoadStringW($mod, 1, $sb, 256) } else { 0 }
+  if ($mod -ne [IntPtr]::Zero) { [void][SField.Res]::FreeLibrary($mod) }
+  Check ($n -gt 0 -and $sb.ToString() -eq 'Soundwavian Field') "screen saver display name (string resource 1) = '$($sb.ToString())'"
   $same = (Get-FileHash $exe).Hash -eq (Get-FileHash $scr).Hash
   Log "  exe/scr identical bytes: $same (the bundler stamps an installer-type marker into its copy of the exe)"
 }

@@ -95,7 +95,23 @@ if (!args.has('--skip-tests')) {
 
 // ---------------------------------------------------------------------------
 step('Native build (no bundle)');
-run('npx', ['tauri', 'build', '--no-bundle']);
+// Publisher identity: tauri.conf.json carries the default
+// ("Soundwave Machine Learning"). When the code-signing certificate is issued
+// to a different legal name, set SFIELD_PUBLISHER (and optionally
+// SFIELD_COPYRIGHT) so CompanyName, the installers' Publisher and the
+// copyright match the certificate subject. Applied to the compile step too,
+// because CompanyName is baked into the executable's version resource.
+const identityOverlay = join(root, 'dist', 'tauri.identity.generated.json');
+const identityArgs = [];
+if (process.env.SFIELD_PUBLISHER || process.env.SFIELD_COPYRIGHT) {
+  const publisher = process.env.SFIELD_PUBLISHER || conf.bundle.publisher;
+  const copyright = process.env.SFIELD_COPYRIGHT || `Copyright (c) ${new Date(Number(process.env.SOURCE_DATE_EPOCH) * 1000).getUTCFullYear()} ${publisher}. All rights reserved.`;
+  mkdirSync(join(root, 'dist'), { recursive: true });
+  writeFileSync(identityOverlay, JSON.stringify({ bundle: { publisher, copyright } }, null, 2));
+  identityArgs.push('--config', identityOverlay);
+  console.log(`Publisher identity override: ${publisher}`);
+}
+run('npx', ['tauri', 'build', '--no-bundle', ...identityArgs]);
 const exePath = join(targetDir, EXE);
 if (!existsSync(exePath)) throw new Error(`${exePath} was not produced`);
 
@@ -114,7 +130,7 @@ copyFileSync(exePath, join(stageDir, SCR));
 
 // ---------------------------------------------------------------------------
 step('Bundle installers (MSI + EXE)');
-const overlays = [join(tauriDir, 'tauri.bundle.conf.json')];
+const overlays = [join(tauriDir, 'tauri.bundle.conf.json'), ...(identityArgs.length ? [identityOverlay] : [])];
 const generated = join(stageDir, 'tauri.release.generated.json');
 const overlay = { bundle: { windows: {} } };
 if (SIGNED) {
@@ -224,6 +240,7 @@ const toolchain = {
 };
 const info = {
   product: conf.productName,
+  publisher: process.env.SFIELD_PUBLISHER || conf.bundle.publisher,
   identifier: conf.identifier,
   version,
   buildKind,

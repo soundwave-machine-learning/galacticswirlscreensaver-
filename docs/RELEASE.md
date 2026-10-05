@@ -54,27 +54,22 @@ build (same SHA-256s).
 | Uninstall works | smoke test step 6 | ✅ CI (MSI + NSIS) |
 | Normal Windows metadata | smoke test prints ProductName, CompanyName, FileDescription, OriginalFilename, version, copyright | ✅ CI (check the values) |
 | Defender scan clean | `defender-scan.txt` (MpCmdRun custom scan of every artifact) | ✅ CI; repeat for the signed build on the release machine |
-| Clean-machine / VM install tested | smoke test on a fresh Windows 10 **and** 11 VM, plus a manual look | ❌ manual |
+| Clean-machine / VM install tested | [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) on Windows 11 and 10, plus the smoke test on a fresh VM | ❌ manual |
 | `.scr` invocation behaviour tested | unit tests + smoke test (`/a`, `/p` with an invalid HWND, `/s`) + **manual** checks of `/c`, the live preview in the Screen Saver dialog, and dismiss-on-input | ⚠️ partly manual |
 | Application exits completely | smoke test: no descendant process survives the main process | ✅ CI; also check after dismissing with the mouse |
 | SHA-256 manifest generated | `SHA256SUMS.txt` | ✅ |
 | Signing configuration documented | [SIGNING.md](SIGNING.md) | ✅ |
 | **Signed** with the publisher's certificate | `build-info.json` → `"signed": true`; `signtool verify` passes | ❌ needs a certificate |
-| Placeholders replaced | `bundle.publisher` / `copyright` in `tauri.conf.json` match the certificate subject | ❌ needs the publisher's name |
-| Real-GPU performance | 60 fps on the target PCs (press **D** for the stats overlay; Auto quality steps down on its own) | ❌ manual |
+| Publisher identity final | `Soundwave Machine Learning` in `tauri.conf.json`; if the certificate is issued to another legal name, set `SFIELD_PUBLISHER` (see [SIGNING.md](SIGNING.md)) | ✅ set; must match the certificate subject |
+| Real-GPU performance | 60 fps per preset, recorded with the **D** overlay (avg, min, tier, GPU) per [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) §6 | ❌ manual |
 
-### Manual checklist for the VM test
+### Manual checklist
 
-1. Fresh Windows 11 (and Windows 10 22H2) VM, fully updated, Defender on, **network disconnected**.
-2. Copy the installer and `SHA256SUMS.txt` over; check the hash: `Get-FileHash .\SoundwavianField-*.msi`.
-3. Double-click the MSI. Note any SmartScreen prompt, then check the UAC dialog's publisher name and the Add/Remove Programs entry.
-4. Start **Soundwavian Field** from the Start Menu → fullscreen, no UI until the mouse moves. Try every key (Space, F, →, M, P, R, Esc, 1–5, D).
-5. Panel → **Use as my screen saver** → **Screen Saver Settings…**. The dialog shows it, and the small preview animates. Click **Settings…** (the `/c` window opens) and **Preview** (`/s`).
-6. Let the screensaver start by itself. Wiggle the mouse: it exits at once. Check Task Manager: no `SoundwavianField` or orphaned `msedgewebview2` processes remain.
-7. Multi-monitor (if available): every display is covered; "Primary display only" leaves the others black.
-8. Run the smoke test (elevated) for both installers.
-9. Uninstall. Reboot. Check Task Manager → Startup apps, Services, Task Scheduler: nothing from Soundwavian Field.
-10. Defender full scan of the install folder before uninstalling: `"%ProgramFiles%\Windows Defender\MpCmdRun.exe" -Scan -ScanType 3 -File "C:\Program Files\Soundwavian Field"`.
+The hands-on checklist, written for a non-developer, is
+[PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md). It covers installation
+and SmartScreen, the screensaver dialog, preview, settings, displays and DPI,
+per-preset performance, system behaviour, a fresh-profile first launch,
+reboot, and uninstall.
 
 ## Reputation testing
 
@@ -112,7 +107,7 @@ built on a fresh `windows-latest` VM (Windows Server 2025 Datacenter 10.0.26100,
 | No executable packer | ✅ |
 | Conventional installer | ✅ WiX MSI and NSIS |
 | Uninstall works | ✅ both installers: exit 0, files and Start Menu entries removed, nothing left behind |
-| Normal Windows metadata | ✅ Product/FileDescription "Soundwavian Field", OriginalFilename `SoundwavianField.exe`, version 0.1.0. ⚠️ Company/copyright are still **placeholders** |
+| Normal Windows metadata | ✅ Product/FileDescription "Soundwavian Field", OriginalFilename `SoundwavianField.exe`, version 0.1.0. (At that commit Company/copyright were still placeholders; fixed since, see below) |
 | Defender scan clean | ✅ "found no threats" for all four files (CI runner) |
 | Clean-machine / VM install tested | ⚠️ passed on a clean Windows **Server 2025** VM (CI). Still needed: Windows 10 and 11 desktop VMs, with a person at the keyboard |
 | `.scr` invocation behaviour | ✅ unit tests; `/a`, `/p 0`, `/p <invalid>` exit; `/s` renders (mean luma 76.8, 92% of pixels lit), keeps running on a first launch, and ends on real mouse movement. ⚠️ Still to check by hand: the live `/p` preview in the Screen Saver dialog, the `/c` window, and multi-monitor |
@@ -120,7 +115,7 @@ built on a fresh `windows-latest` VM (Windows Server 2025 Datacenter 10.0.26100,
 | SHA-256 manifest | ✅ |
 | Signing configuration documented | ✅ |
 | Signed with the publisher's certificate | ❌ no certificate available yet |
-| Placeholders replaced | ❌ publisher name needed |
+| Placeholders replaced | ❌ at that commit (fixed in the hardening pass below) |
 | Real-GPU 60 fps | ❌ not yet measured. CI renders through a software adapter, which says nothing about real-GPU fps |
 
 **Verdict:** the packaging, offline behaviour and install/uninstall hygiene are

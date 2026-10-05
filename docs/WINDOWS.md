@@ -66,6 +66,8 @@ never writes to a system directory. Choose any one of these:
    same way the Windows dialog stores it) and enables the screensaver.
    **Screen Saver Settings…** then opens the standard dialog so you can set
    the wait time.
+   The dialog lists it as **Soundwavian Field**: the `.scr` carries string
+   resource 1 (`IDS_DESCRIPTION`), the name Windows uses for a screensaver.
 2. **From Explorer:** right-click `C:\Program Files\Soundwavian Field\SoundwavianField.scr` → **Install**.
 3. **Test it:** right-click the `.scr` → **Test**, or run `SoundwavianField.scr /s`.
 

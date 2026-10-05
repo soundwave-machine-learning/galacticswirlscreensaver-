@@ -70,10 +70,25 @@ certificates), sign on a dedicated release machine, or switch the CI step to
   changed in 2024), so it isn't required.
 
 Use the **same certificate and publisher name for every release**. SmartScreen
-reputation builds up on the signer, and switching certificates resets it. Make
-the publisher name in `src-tauri/tauri.conf.json` (`bundle.publisher`,
-`bundle.copyright`) match the certificate's subject before the first signed
-release.
+reputation builds up on the signer, and switching certificates resets it.
+
+### Publisher name vs. certificate subject
+
+The default identity in `src-tauri/tauri.conf.json` is **Soundwave Machine
+Learning**. It appears as CompanyName in the executable's version info, as
+the installers' Publisher, in Add/Remove Programs and in the copyright line.
+The certificate's subject (the "Verified publisher" Windows shows) comes from
+the certificate itself and can't be set here. If the certificate is issued to
+a different legal name (e.g. "Soundwave Machine Learning LLC"), make the
+metadata match it without editing source:
+
+| Variable | Effect |
+| --- | --- |
+| `SFIELD_PUBLISHER` | Overrides `bundle.publisher` for both the compile and bundle steps (CompanyName, installer Publisher) |
+| `SFIELD_COPYRIGHT` | Overrides the copyright line (default: `Copyright (c) <commit year> <publisher>. All rights reserved.`) |
+
+In CI, set them as repository **variables** of the same names.
+`build-info.json` records the publisher each build used.
 
 ## Verifying a signed file yourself
 

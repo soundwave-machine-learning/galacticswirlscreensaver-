@@ -68,7 +68,7 @@ also hides after ~3 s.
 | **R** | Randomize seed (fades out, re-seeds, fades in) |
 | **Escape** | Leave fullscreen |
 | **1–5** | Presets: Stillness, Orbit, Deep Field, Ascension, Void |
-| **D** | Stats overlay (fps, quality, transition state) |
+| **D** | Stats overlay: fps, quality tier, per-preset avg/min fps, GPU, resolution, transition state |
 
 Panel: **Intensity, Spiral, Matrix, Particles, Breathing, Transition Speed,
 Brightness** sliders (multipliers on top of the preset; 1.00 = as designed),
@@ -162,7 +162,7 @@ is limited to ≤64 nodes and ≤16 links.
 > Measured so far: the visuals were developed and verified in headless Chromium
 > on a software rasteriser (SwiftShader), which says nothing about real-GPU
 > frame rates. Real-hardware fps is still to be measured: press **D** on the
-> target PC. See [docs/RELEASE.md](docs/RELEASE.md).
+> target PC and follow [docs/PHYSICAL_WINDOWS_GATE.md](docs/PHYSICAL_WINDOWS_GATE.md) §6.
 
 ## Windows app, screensaver and installer
 
@@ -197,6 +197,7 @@ Full details are in these docs:
 - **[SECURITY.md](SECURITY.md)**: the security review, covering every executable, DLL, process,
   registry key, file location and network endpoint.
 - **[docs/RELEASE.md](docs/RELEASE.md)**: the release process and the **release gate** with its current status.
+- **[docs/PHYSICAL_WINDOWS_GATE.md](docs/PHYSICAL_WINDOWS_GATE.md)**: the hands-on Windows 10/11 test checklist (non-developer friendly).
 
 ### About SmartScreen and antivirus warnings
 
