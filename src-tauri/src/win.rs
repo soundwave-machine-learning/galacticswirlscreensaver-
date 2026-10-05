@@ -8,8 +8,10 @@ use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Storage::FileSystem::GetShortPathNameW;
 use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+use windows::Win32::Foundation::POINT;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SystemParametersInfoW,
+    GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SystemParametersInfoW,
     SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETSCREENSAVEACTIVE,
 };
 
@@ -37,6 +39,18 @@ pub fn foreground_is_ours() -> bool {
         GetWindowThreadProcessId(fg, Some(&mut pid));
         pid == std::process::id()
     }
+}
+
+/// Tick count of the session's most recent keyboard/mouse input.
+pub fn last_input_tick() -> Option<u32> {
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    unsafe { GetLastInputInfo(&mut info).as_bool().then_some(info.dwTime) }
+}
+
+/// Current cursor position in screen coordinates (None on the secure desktop).
+pub fn cursor_pos() -> Option<(i32, i32)> {
+    let mut p = POINT::default();
+    unsafe { GetCursorPos(&mut p).ok().map(|_| (p.x, p.y)) }
 }
 
 /// Client-area size of the preview host window, in physical pixels.

@@ -39,6 +39,9 @@ const SCR_NAME: &str = "SoundwavianField.scr";
 #[cfg(windows)]
 const EXIT_FOCUS_LOST: i32 = 2;
 
+/// Longest a dismissed window may take to shut down cleanly.
+const EXIT_GRACE: Duration = Duration::from_millis(2000);
+
 static MODE: OnceLock<Mode> = OnceLock::new();
 static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
 
@@ -65,9 +68,25 @@ fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
     settings::save(&config_dir(&app)?, &json)
 }
 
+/// Ends the program. The windows are hidden first so the screen is handed
+/// back to the user immediately; then the normal shutdown runs. WebView2
+/// teardown can occasionally take seconds on a cold start, so a watchdog
+/// ends the process if it has not exited after `EXIT_GRACE`. (The WebView2
+/// helper processes notice and close themselves.)
+fn shut_down(app: &AppHandle, code: i32) {
+    for window in app.webview_windows().values() {
+        let _ = window.hide();
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(EXIT_GRACE);
+        std::process::exit(code);
+    });
+    app.exit(code);
+}
+
 #[tauri::command]
 fn exit_app(app: AppHandle) {
-    app.exit(0);
+    shut_down(&app, 0);
 }
 
 #[tauri::command]
@@ -192,6 +211,39 @@ fn open_screensaver(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Native dismissal for full-screen mode, independent of the web page: the
+/// classic screen saver check. A key, click or wheel (new session input
+/// while the cursor stays put) or more than `MOVE_THRESHOLD` px of cursor
+/// travel ends the screen saver. The page's own input handling remains the
+/// primary path; this guarantees dismissal even if the page stops responding.
+#[cfg(windows)]
+fn watch_input(app: AppHandle) {
+    const MOVE_THRESHOLD: i32 = 10;
+    std::thread::spawn(move || {
+        // Ignore the input that triggered launch / window creation jitter.
+        std::thread::sleep(Duration::from_millis(1000));
+        let origin = win::cursor_pos();
+        let mut prev_pos = origin;
+        let mut prev_tick = win::last_input_tick();
+        loop {
+            std::thread::sleep(Duration::from_millis(50));
+            let pos = win::cursor_pos();
+            let tick = win::last_input_tick();
+            let moved_far = match (origin, pos) {
+                (Some((x0, y0)), Some((x, y))) => (x - x0).abs().max((y - y0).abs()) > MOVE_THRESHOLD,
+                _ => false,
+            };
+            let other_input = tick.is_some() && prev_tick.is_some() && tick != prev_tick && pos == prev_pos;
+            if moved_far || other_input {
+                shut_down(&app, 0);
+                break;
+            }
+            prev_pos = pos;
+            prev_tick = tick;
+        }
+    });
+}
+
 #[cfg(windows)]
 fn open_preview(app: &AppHandle, parent: isize) -> tauri::Result<()> {
     let (w, h) = win::client_size(parent).unwrap_or((152, 112));
@@ -212,7 +264,7 @@ fn open_preview(app: &AppHandle, parent: isize) -> tauri::Result<()> {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(400));
         if !win::window_alive(parent) {
-            handle.exit(0);
+            shut_down(&handle, 0);
             break;
         }
     });
@@ -250,7 +302,11 @@ fn main() {
             match mode {
                 Mode::App => open_app(&handle)?,
                 Mode::Config(owner) => open_config(&handle, owner)?,
-                Mode::Screensaver => open_screensaver(&handle)?,
+                Mode::Screensaver => {
+                    open_screensaver(&handle)?;
+                    #[cfg(windows)]
+                    watch_input(handle.clone());
+                }
                 #[cfg(windows)]
                 Mode::Preview(parent) => open_preview(&handle, parent)?,
                 #[cfg(not(windows))]
@@ -281,7 +337,7 @@ fn main() {
                         // Let focus settle before deciding.
                         std::thread::sleep(Duration::from_millis(400));
                         if !win::foreground_is_ours() {
-                            handle.exit(EXIT_FOCUS_LOST);
+                            shut_down(&handle, EXIT_FOCUS_LOST);
                         }
                     });
                 }

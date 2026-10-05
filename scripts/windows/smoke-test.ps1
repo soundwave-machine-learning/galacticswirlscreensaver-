@@ -215,22 +215,29 @@ Log "  process tree:"
 foreach ($t in $tree) { Log ("    {0,6} {1}" -f $t.ProcessId, $t.Name) }
 Check ($conns.Count -eq 0) "no network sockets opened by the app or its WebView2 processes $(if ($conns.Count) { '-> ' + (($conns | ForEach-Object { "$($_.OwningProcess) $($_.RemoteAddress):$($_.RemotePort)$($_.LocalPort)" }) -join '; ') })"
 
-# Real mouse movement must dismiss it (SetCursorPos generates WM_MOUSEMOVE).
+# Real mouse movement must dismiss it (SetCursorPos generates WM_MOUSEMOVE),
+# promptly: the screen must be handed back to the user within ~2 s.
 if (-not $proc.HasExited) {
   Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
   foreach ($pt in @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))) {
     [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($pt[0], $pt[1])
     Start-Sleep -Milliseconds 400
   }
-  $dismissed = $proc.WaitForExit(8000)
-  Check $dismissed 'moving the mouse ends the screen saver'
+  $dismissed = $proc.WaitForExit(15000)
+  $secs = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+  Check $dismissed "moving the mouse ends the screen saver ($(if ($dismissed) { "exited after $secs s, code $($proc.ExitCode)" } else { 'still running after 15 s' }))"
+  if ($dismissed) { Check ($secs -le 4.5) "it ends promptly (<= 4.5 s including 1.6 s of mouse movement; took $secs s)" }
 }
 # Ending the main process must take every child with it (no lingering processes).
 if (-not $proc.HasExited) { Stop-Process -Id $proc.Id }
-Start-Sleep -Seconds 6
 $treeKeys = @($tree | ForEach-Object { "$($_.ProcessId)@$($_.CreationDate.Ticks)" })
-$left = @(Get-CimInstance Win32_Process | Where-Object { $treeKeys -contains "$($_.ProcessId)@$($_.CreationDate.Ticks)" })
-Check ($left.Count -eq 0) "no processes remain after the screen saver ends $(if ($left.Count) { '-> ' + ($left.Name -join ', ') })"
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+do {
+  Start-Sleep -Milliseconds 500
+  $left = @(Get-CimInstance Win32_Process | Where-Object { $treeKeys -contains "$($_.ProcessId)@$($_.CreationDate.Ticks)" })
+} while ($left.Count -gt 0 -and $sw.Elapsed.TotalSeconds -lt 15)
+Check ($left.Count -eq 0 -and $sw.Elapsed.TotalSeconds -le 10) "no processes remain after the screen saver ends (drained in $([math]::Round($sw.Elapsed.TotalSeconds, 1)) s) $(if ($left.Count) { '-> ' + ($left.Name -join ', ') })"
 
 Log "`n[6] Uninstall"
 if ($kind -eq 'msi') {
