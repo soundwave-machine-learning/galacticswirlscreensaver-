@@ -69,6 +69,14 @@ public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIn
 public static extern System.IntPtr FindWindowExW(System.IntPtr parent, System.IntPtr after, string cls, string title);
 [DllImport("user32.dll")]
 public static extern uint GetWindowThreadProcessId(System.IntPtr hwnd, out uint pid);
+[DllImport("user32.dll")]
+public static extern System.IntPtr GetForegroundWindow();
+[StructLayout(LayoutKind.Sequential)]
+public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+[DllImport("user32.dll")]
+public static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+public static uint LastInputTick() { var i = new LASTINPUTINFO(); i.cbSize = 8; GetLastInputInfo(ref i); return i.dwTime; }
+public static uint ForegroundPid() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
 '@
 
 # ---------------------------------------------------------------------------
@@ -221,15 +229,22 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     $hadWindow = $proc.MainWindowHandle -ne [IntPtr]::Zero
     $moves = @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))
     $mi = 0; $nextMove = 0; $pressed = $false; $released = $null
+    $fgPid = [SField.Native]::ForegroundPid()
+    $tickBefore = [SField.Native]::LastInputTick()
+    Log "  before input: foreground window owned by pid $fgPid ($(if ($fgPid -eq $proc.Id) { 'the screen saver' } else { 'another process' })); last-input tick $tickBefore"
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     while ($sw.Elapsed.TotalSeconds -lt 15) {
       if ($dismiss -eq 'mouse' -and $mi -lt $moves.Count -and $sw.ElapsedMilliseconds -ge $nextMove) {
         [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($moves[$mi][0], $moves[$mi][1]); $mi++; $nextMove += 400
       }
-      if ($dismiss -eq 'keyboard' -and -not $pressed) { Press-Key; $pressed = $true }
+      if ($dismiss -eq 'keyboard' -and -not $pressed) {
+        Press-Key; $pressed = $true
+        $tickAfter = [SField.Native]::LastInputTick()
+        Log "  injected key: last-input tick $tickBefore -> $tickAfter ($(if ($tickAfter -ne $tickBefore) { 'registered by Windows' } else { 'NOT registered - synthetic input did not reach this session' }))"
+      }
       $proc.Refresh()
       if ($null -eq $released -and ($proc.HasExited -or ($hadWindow -and $proc.MainWindowHandle -eq [IntPtr]::Zero))) { $released = $sw.Elapsed.TotalSeconds }
-      if ($proc.HasExited) { break }
+      if ($proc.HasExited) { if ($null -eq $released) { $released = $sw.Elapsed.TotalSeconds }; break }
       Start-Sleep -Milliseconds 50
     }
     $ok = $proc.HasExited
