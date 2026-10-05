@@ -172,6 +172,15 @@ build be classified as *DISTRIBUTION READY*.
 6. Release layout: `SoundwavianField-Setup-<ver>.exe`, `SoundwavianField-<ver>.msi`, `.scr`, `.exe`,
    `SHA256SUMS.txt`, `BUILD_INFO.txt`, `README-FIRST.txt`, with reports in `reports/`. Diagnostics (**D** / **C**,
    local clipboard only) added.
+7. **Test-timing robustness.** Run
+   [37381578728](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37381578728)
+   (`a3fffce`, documentation-only change on top of `358f322`) failed the MSI test's keyboard-dismissal timing with
+   "18.28 s", while its setup.exe test passed. The log timestamps show the runner itself was starved. The test spent
+   23 s between two consecutive statements around the key injection, and afterwards single log lines took 3–11 s
+   each. So the 18.28 s was the test's own stopwatch, not the app's latency. Latencies are now measured from Windows'
+   own input timestamp (`GetLastInputInfo`) for the key, and from the process's exit time (`Process.ExitTime`). Runner
+   stalls are logged. The thresholds (1.5 s hand-back, 3 s exit) are unchanged. The WebView2 helpers in that stalled
+   test also took 26 s to drain; the 10 s drain check is unchanged.
 
 **Verdict:** don't call this publicly distribution-ready until it's built with `--signed` using your certificate and
 [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) passes on Windows 11 (and Windows 10 if available) for that

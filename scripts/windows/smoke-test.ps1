@@ -76,6 +76,7 @@ public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
 [DllImport("user32.dll")]
 public static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
 public static uint LastInputTick() { var i = new LASTINPUTINFO(); i.cbSize = 8; GetLastInputInfo(ref i); return i.dwTime; }
+public static uint MsSinceLastInput() { var i = new LASTINPUTINFO(); i.cbSize = 8; GetLastInputInfo(ref i); return unchecked((uint)Environment.TickCount - i.dwTime); }
 public static uint ForegroundPid() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
 [DllImport("dwmapi.dll")]
 public static extern int DwmGetWindowAttribute(System.IntPtr hwnd, int attr, out int value, int size);
@@ -194,10 +195,14 @@ function Wait-WindowTitle($proc, [string] $pattern, [int] $seconds) {
   return $null
 }
 
+# Returns when Windows registered the key-down, from the session's own input
+# timestamp, so a stalled test runner can't distort the measured latency.
 function Press-Key {
   [SField.Native]::keybd_event(0x41, 0, 0, [UIntPtr]::Zero)   # 'A' down
+  $downAt = [DateTime]::Now.AddMilliseconds(-[double][SField.Native]::MsSinceLastInput())
   Start-Sleep -Milliseconds 60
   [SField.Native]::keybd_event(0x41, 0, 2, [UIntPtr]::Zero)   # 'A' up
+  return $downAt
 }
 
 # Run /s, verify it renders, has only expected children and no sockets, then
@@ -232,29 +237,44 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     $hwndBefore = $proc.MainWindowHandle
     $hadWindow = $hwndBefore -ne [IntPtr]::Zero
     $moves = @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))
-    $mi = 0; $nextMove = 0; $pressed = $false; $released = $null
+    $mi = 0; $nextMove = 0; $pressed = $false; $released = $null; $inputAt = $null
     $fgPid = [SField.Native]::ForegroundPid()
     $tickBefore = [SField.Native]::LastInputTick()
     Log "  before input: foreground window owned by pid $fgPid ($(if ($fgPid -eq $proc.Id) { 'the screen saver' } else { 'another process' })); last-input tick $tickBefore"
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    # Latencies are measured from the moment of input to the observed hide and to
+    # the process's own exit time (recorded by Windows). The polling loop only
+    # provides upper bounds, so a stall of the test runner itself shows up as
+    # a large loop gap (logged) instead of as app latency.
+    $sw = [System.Diagnostics.Stopwatch]::StartNew(); $maxGap = 0.0; $lastIter = 0.0
     while ($sw.Elapsed.TotalSeconds -lt 15) {
+      $t = $sw.Elapsed.TotalSeconds; $maxGap = [math]::Max($maxGap, $t - $lastIter); $lastIter = $t
       if ($dismiss -eq 'mouse' -and $mi -lt $moves.Count -and $sw.ElapsedMilliseconds -ge $nextMove) {
+        # (Cursor moves don't update the last-input time, so time the first move here.)
         [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($moves[$mi][0], $moves[$mi][1]); $mi++; $nextMove += 400
+        if ($null -eq $inputAt) { $inputAt = [DateTime]::Now }
       }
       if ($dismiss -eq 'keyboard' -and -not $pressed) {
-        Press-Key; $pressed = $true
+        $inputAt = Press-Key; $pressed = $true
         $tickAfter = [SField.Native]::LastInputTick()
         Log "  injected key: last-input tick $tickBefore -> $tickAfter ($(if ($tickAfter -ne $tickBefore) { 'registered by Windows' } else { 'NOT registered - synthetic input did not reach this session' }))"
       }
       $proc.Refresh()
       # Handed back = hidden, cloaked by DWM (off screen at composition level), or exited.
-      if ($null -eq $released -and ($proc.HasExited -or ($hadWindow -and ($proc.MainWindowHandle -eq [IntPtr]::Zero -or [SField.Native]::IsCloaked($hwndBefore))))) { $released = $sw.Elapsed.TotalSeconds }
-      if ($proc.HasExited) { if ($null -eq $released) { $released = $sw.Elapsed.TotalSeconds }; break }
+      if ($null -eq $released -and -not $proc.HasExited -and $hadWindow -and ($proc.MainWindowHandle -eq [IntPtr]::Zero -or [SField.Native]::IsCloaked($hwndBefore))) {
+        $released = ([DateTime]::Now - $inputAt).TotalSeconds
+      }
+      if ($proc.HasExited) { break }
       Start-Sleep -Milliseconds 50
     }
     $ok = $proc.HasExited
-    $secs = [math]::Round($sw.Elapsed.TotalSeconds, 2)
-    Check $ok "$label`: $dismiss input ends the screen saver ($(if ($ok) { "process exited after $secs s, code $($proc.ExitCode)" } else { 'still running after 15 s' }))"
+    if ($maxGap -gt 0.5) { Log ("  note: the test runner itself stalled for up to {0:N1} s between polls; latencies below use Windows' timestamps" -f $maxGap) }
+    if ($ok) {
+      $exitAfter = ($proc.ExitTime - $inputAt).TotalSeconds
+      # The process exiting hands the screen back too; its exit time is exact.
+      if ($null -eq $released -or $exitAfter -lt $released) { $released = $exitAfter }
+      $secs = [math]::Round($exitAfter, 2)
+    }
+    Check $ok "$label`: $dismiss input ends the screen saver ($(if ($ok) { "process exited $secs s after the input, code $($proc.ExitCode)" } else { 'still running after 15 s' }))"
     if ($null -ne $released) {
       $r = [math]::Round($released, 2)
       Check ($released -le 1.5) "$label`: screen handed back within 1.5 s of the input (window hidden after $r s$(if (-not $hadWindow) { '; measured as process exit' }))"
