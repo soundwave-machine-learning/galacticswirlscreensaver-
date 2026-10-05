@@ -35,8 +35,10 @@ serde_json = "1"
 # Same major version tauri uses, so HWND types are shared.
 windows = { version = "0.62", features = [
   "Win32_Foundation",
+  "Win32_Graphics_Dwm",
   "Win32_Storage_FileSystem",
   "Win32_System_Registry",
+  "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
 ] }

@@ -8,7 +8,10 @@ use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Storage::FileSystem::GetShortPathNameW;
 use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+use windows::core::BOOL;
 use windows::Win32::Foundation::POINT;
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CLOAK};
+use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, ShowWindowAsync,
@@ -41,11 +44,31 @@ pub fn foreground_is_ours() -> bool {
     }
 }
 
-/// Hides a window without waiting for its thread (posts the request).
-pub fn hide_async(raw: isize) {
+/// Takes a window off the screen without needing its UI thread: the DWM
+/// cloak applies immediately (composition-level), and the hide request is
+/// posted for when the thread next pumps messages.
+pub fn hide_now(raw: isize) {
     unsafe {
+        let cloak = BOOL(1);
+        let _ = DwmSetWindowAttribute(
+            hwnd(raw),
+            DWMWA_CLOAK,
+            &cloak as *const BOOL as *const core::ffi::c_void,
+            std::mem::size_of::<BOOL>() as u32,
+        );
         let _ = ShowWindowAsync(hwnd(raw), SW_HIDE);
     }
+}
+
+/// Ends this process immediately. Used only by the shutdown watchdog when the
+/// normal exit has not finished in time; skips CRT/DLL teardown, which is
+/// what can stall (WebView2/COM). The WebView2 helper processes notice the
+/// host has gone and close themselves.
+pub fn terminate_now(code: i32) -> ! {
+    unsafe {
+        let _ = TerminateProcess(GetCurrentProcess(), code as u32);
+    }
+    std::process::exit(code)
 }
 
 /// Tick count of the session's most recent keyboard/mouse input.

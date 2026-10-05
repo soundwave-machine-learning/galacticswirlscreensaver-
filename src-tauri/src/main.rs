@@ -77,10 +77,12 @@ fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
 ///  1. Only the first caller proceeds (input can be detected by the page and
 ///     by the native watcher at the same moment).
 ///  2. The watchdog is armed before anything else, so the process is gone
-///     within `EXIT_GRACE` even if WebView2 teardown or the UI thread stalls.
-///  3. Windows are hidden with ShowWindowAsync on handles recorded at
-///     creation, which never waits on the UI thread, so the screen is handed
-///     back at once.
+///     within `EXIT_GRACE` even if WebView2 teardown or the UI thread stalls
+///     (it terminates the process outright rather than running CRT/DLL
+///     teardown, which is what stalled in testing).
+///  3. Windows are cloaked through DWM and hidden with ShowWindowAsync, on
+///     handles recorded at creation - neither waits on the UI thread, so
+///     the screen is handed back at once.
 ///  4. The normal shutdown runs; the WebView2 helper processes notice the
 ///     host is gone and close themselves.
 fn shut_down(app: &AppHandle, code: i32) {
@@ -89,11 +91,14 @@ fn shut_down(app: &AppHandle, code: i32) {
     }
     std::thread::spawn(move || {
         std::thread::sleep(EXIT_GRACE);
+        #[cfg(windows)]
+        win::terminate_now(code);
+        #[cfg(not(windows))]
         std::process::exit(code);
     });
     #[cfg(windows)]
     for raw in WINDOW_HANDLES.lock().map(|v| v.clone()).unwrap_or_default() {
-        win::hide_async(raw);
+        win::hide_now(raw);
     }
     app.exit(code);
 }
