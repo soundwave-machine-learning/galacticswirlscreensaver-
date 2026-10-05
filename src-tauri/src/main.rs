@@ -130,18 +130,15 @@ fn start_watchdog() {
 ///     skips CRT/DLL teardown, which is what stalled in testing.
 ///  3. Windows are cloaked through DWM and hidden with ShowWindowAsync, on
 ///     handles recorded at creation, without waiting on the UI thread.
-///  4. The normal shutdown runs (other modes); the WebView2 helper processes
-///     notice the host is gone and close themselves.
+///  4. Other modes run the normal shutdown. In every mode the WebView2 helper
+///     processes notice the host is gone and close themselves.
 fn shut_down(app: &AppHandle, code: i32) {
     if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
         return;
     }
     trace!("shut_down code={code}");
-    let grace = if matches!(MODE.get(), Some(Mode::Screensaver)) {
-        Duration::ZERO
-    } else {
-        EXIT_GRACE
-    };
+    let screensaver = matches!(MODE.get(), Some(Mode::Screensaver));
+    let grace = if screensaver { Duration::ZERO } else { EXIT_GRACE };
     if !WATCHDOG.get().is_some_and(|tx| tx.send((grace, code)).is_ok()) {
         std::thread::spawn(move || {
             std::thread::sleep(grace);
@@ -156,8 +153,12 @@ fn shut_down(app: &AppHandle, code: i32) {
         win::hide_now(raw);
     }
     trace!("windows cloaked");
-    app.exit(code);
-    trace!("exit requested");
+    // A screen saver is terminated by the watchdog right away; starting the
+    // normal exit as well would only race it.
+    if !screensaver {
+        app.exit(code);
+        trace!("exit requested");
+    }
 }
 
 /// Records a window's native handle so shutdown can hide it without going

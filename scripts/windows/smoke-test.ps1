@@ -181,6 +181,11 @@ function Test-Drained($tree, [string] $label) {
   Check ($windows.Count -eq 0) "$label`: no Soundwavian Field window remains on screen"
 }
 
+# Names of the DLLs loaded in a process (read from outside; empty if not readable).
+function Get-ModuleNames($proc) {
+  try { $proc.Refresh(); @($proc.Modules | ForEach-Object { $_.ModuleName }) } catch { @() }
+}
+
 function Test-ChildNames($tree, [string] $label) {
   $others = @($tree | Where-Object { $_.Name -notin @('SoundwavianField.scr', 'SoundwavianField.exe', 'msedgewebview2.exe') })
   Check ($others.Count -eq 0) "$label`: only SoundwavianField + msedgewebview2.exe processes (no cmd/conhost/powershell) $(if ($others.Count) { '-> ' + ($others.Name -join ', ') })"
@@ -241,6 +246,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     $hadWindow = $hwndBefore -ne [IntPtr]::Zero
     $moves = @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))
     $mi = 0; $nextMove = 0; $pressed = $false; $released = $null; $inputAt = $null; $exitSeen = $null
+    $modsBefore = Get-ModuleNames $proc
     $fgPid = [SField.Native]::ForegroundPid()
     $tickBefore = [SField.Native]::LastInputTick()
     Log "  before input: foreground window owned by pid $fgPid ($(if ($fgPid -eq $proc.Id) { 'the screen saver' } else { 'another process' })); last-input tick $tickBefore"
@@ -258,7 +264,11 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
       }
       if ($dismiss -eq 'keyboard' -and -not $pressed) {
         $inputAt = Press-Key; $pressed = $true
+        # Which DLLs the keystroke made the process load (diagnostic only).
+        $modsAfter = Get-ModuleNames $proc
         $tickAfter = [SField.Native]::LastInputTick()
+        $newMods = @($modsAfter | Where-Object { $modsBefore -notcontains $_ })
+        Log "  modules loaded after the key: $(if (-not $modsAfter.Count) { '(not readable - process already ending)' } elseif ($newMods.Count) { $newMods -join ', ' } else { 'none' }) (before: $($modsBefore.Count))"
         Log "  injected key: last-input tick $tickBefore -> $tickAfter ($(if ($tickAfter -ne $tickBefore) { 'registered by Windows' } else { 'NOT registered - synthetic input did not reach this session' }))"
       }
       $proc.Refresh()
