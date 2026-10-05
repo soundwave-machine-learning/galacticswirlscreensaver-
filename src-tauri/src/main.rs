@@ -98,31 +98,59 @@ fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
     settings::save(&config_dir(&app)?, &json)
 }
 
+/// The watchdog thread is started with the program, long before any input,
+/// and parked on a channel. Creating a thread at shutdown time was not
+/// reliable: in testing, the first keystroke into the WebView2 window kept
+/// the UI thread loading input DLLs (under the loader lock, which every new
+/// thread needs) for seconds, so a watchdog spawned then started late or
+/// not at all. Waking a parked thread needs no lock of that kind.
+static WATCHDOG: OnceLock<std::sync::mpsc::Sender<(Duration, i32)>> = OnceLock::new();
+
+fn start_watchdog() {
+    let (tx, rx) = std::sync::mpsc::channel::<(Duration, i32)>();
+    std::thread::spawn(move || {
+        if let Ok((grace, code)) = rx.recv() {
+            std::thread::sleep(grace);
+            trace!("watchdog: terminating");
+            #[cfg(windows)]
+            win::terminate_now(code);
+            #[cfg(not(windows))]
+            std::process::exit(code);
+        }
+    });
+    let _ = WATCHDOG.set(tx);
+}
+
 /// Ends the program. Order matters, and every step is non-blocking:
 ///  1. Only the first caller proceeds (input can be detected by the page and
 ///     by the native watcher at the same moment).
-///  2. The watchdog is armed before anything else, so the process is gone
-///     within `EXIT_GRACE` even if WebView2 teardown or the UI thread stalls
-///     (it terminates the process outright rather than running CRT/DLL
-///     teardown, which is what stalled in testing).
+///  2. The pre-started watchdog is triggered before anything else. As a
+///     screen saver there is nothing to save, so the process is terminated
+///     at once; other modes get `EXIT_GRACE` to close normally. Termination
+///     skips CRT/DLL teardown, which is what stalled in testing.
 ///  3. Windows are cloaked through DWM and hidden with ShowWindowAsync, on
-///     handles recorded at creation - neither waits on the UI thread, so
-///     the screen is handed back at once.
-///  4. The normal shutdown runs; the WebView2 helper processes notice the
-///     host is gone and close themselves.
+///     handles recorded at creation, without waiting on the UI thread.
+///  4. The normal shutdown runs (other modes); the WebView2 helper processes
+///     notice the host is gone and close themselves.
 fn shut_down(app: &AppHandle, code: i32) {
     if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
         return;
     }
     trace!("shut_down code={code}");
-    std::thread::spawn(move || {
-        std::thread::sleep(EXIT_GRACE);
-        trace!("watchdog: terminating");
-        #[cfg(windows)]
-        win::terminate_now(code);
-        #[cfg(not(windows))]
-        std::process::exit(code);
-    });
+    let grace = if matches!(MODE.get(), Some(Mode::Screensaver)) {
+        Duration::ZERO
+    } else {
+        EXIT_GRACE
+    };
+    if !WATCHDOG.get().is_some_and(|tx| tx.send((grace, code)).is_ok()) {
+        std::thread::spawn(move || {
+            std::thread::sleep(grace);
+            #[cfg(windows)]
+            win::terminate_now(code);
+            #[cfg(not(windows))]
+            std::process::exit(code);
+        });
+    }
     #[cfg(windows)]
     for raw in WINDOW_HANDLES.lock().map(|v| v.clone()).unwrap_or_default() {
         win::hide_now(raw);
@@ -357,6 +385,7 @@ fn main() {
         }
     }
     let _ = MODE.set(mode);
+    start_watchdog();
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![

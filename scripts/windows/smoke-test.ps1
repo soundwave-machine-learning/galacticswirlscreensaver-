@@ -288,7 +288,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     } else {
       Check $false "$label`: screen handed back (window never hid)"
     }
-    if ($ok) { Check ($secs -le 3) "$label`: process gone within 3 s of the input (detection + 1 s watchdog; took $secs s)" }
+    if ($ok) { Check ($secs -le 3) "$label`: process gone within 3 s of the input (detection + termination; took $secs s)" }
   }
   if (-not $proc.HasExited) { Stop-Process -Id $proc.Id }
   if (Test-Path $tracePath) { Get-Content $tracePath | ForEach-Object { Log "    trace: $_" } }
