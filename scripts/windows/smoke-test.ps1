@@ -240,7 +240,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     $hwndBefore = $proc.MainWindowHandle
     $hadWindow = $hwndBefore -ne [IntPtr]::Zero
     $moves = @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))
-    $mi = 0; $nextMove = 0; $pressed = $false; $released = $null; $inputAt = $null
+    $mi = 0; $nextMove = 0; $pressed = $false; $released = $null; $inputAt = $null; $exitSeen = $null
     $fgPid = [SField.Native]::ForegroundPid()
     $tickBefore = [SField.Native]::LastInputTick()
     Log "  before input: foreground window owned by pid $fgPid ($(if ($fgPid -eq $proc.Id) { 'the screen saver' } else { 'another process' })); last-input tick $tickBefore"
@@ -266,18 +266,21 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
       if ($null -eq $released -and -not $proc.HasExited -and $hadWindow -and ($proc.MainWindowHandle -eq [IntPtr]::Zero -or [SField.Native]::IsCloaked($hwndBefore))) {
         $released = ([DateTime]::Now - $inputAt).TotalSeconds
       }
-      if ($proc.HasExited) { break }
+      if ($proc.HasExited) { $exitSeen = [DateTime]::Now; break }
       Start-Sleep -Milliseconds 50
     }
     $ok = $proc.HasExited
-    if ($inputAt) { Log "  input at unix ms $([DateTimeOffset]::new($inputAt).ToUnixTimeMilliseconds())$(if ($proc.HasExited) { "; process exit at unix ms $([DateTimeOffset]::new($proc.ExitTime).ToUnixTimeMilliseconds())" })" }
     if ($maxGap -gt 0.5) { Log ("  note: the test runner itself stalled for up to {0:N1} s between polls; latencies below use Windows' timestamps" -f $maxGap) }
     if ($ok) {
-      $exitAfter = ($proc.ExitTime - $inputAt).TotalSeconds
+      # ExitTime is exact when Windows provides it; otherwise use when the exit was observed.
+      $exitAt = try { $proc.ExitTime } catch { $null }
+      if ($null -eq $exitAt -or $exitAt.Year -lt 2000) { $exitAt = $exitSeen }
+      $exitAfter = ($exitAt - $inputAt).TotalSeconds
       # The process exiting hands the screen back too; its exit time is exact.
       if ($null -eq $released -or $exitAfter -lt $released) { $released = $exitAfter }
       $secs = [math]::Round($exitAfter, 2)
     }
+    if ($inputAt) { Log "  input at unix ms $([DateTimeOffset]::new($inputAt).ToUnixTimeMilliseconds())$(if ($ok) { "; process exit at unix ms $([DateTimeOffset]::new($exitAt).ToUnixTimeMilliseconds())" })" }
     Check $ok "$label`: $dismiss input ends the screen saver ($(if ($ok) { "process exited $secs s after the input, code $($proc.ExitCode)" } else { 'still running after 15 s' }))"
     if ($null -ne $released) {
       $r = [math]::Round($released, 2)

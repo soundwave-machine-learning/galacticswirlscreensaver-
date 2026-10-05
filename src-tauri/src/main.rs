@@ -117,6 +117,7 @@ fn shut_down(app: &AppHandle, code: i32) {
     trace!("shut_down code={code}");
     std::thread::spawn(move || {
         std::thread::sleep(EXIT_GRACE);
+        trace!("watchdog: terminating");
         #[cfg(windows)]
         win::terminate_now(code);
         #[cfg(not(windows))]
@@ -126,7 +127,9 @@ fn shut_down(app: &AppHandle, code: i32) {
     for raw in WINDOW_HANDLES.lock().map(|v| v.clone()).unwrap_or_default() {
         win::hide_now(raw);
     }
+    trace!("windows cloaked");
     app.exit(code);
+    trace!("exit requested");
 }
 
 /// Records a window's native handle so shutdown can hide it without going
