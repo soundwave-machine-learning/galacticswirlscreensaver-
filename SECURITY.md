@@ -26,6 +26,45 @@ automated check for both installers. The details are in [docs/RELEASE.md](docs/R
 | Scripts executed | **None** by the app. The installers run no PowerShell, CMD, VBScript or JScript | MSI `CustomAction` table, generated NSIS source in `dist/release/reports/installer-sources/` |
 | Executable packers / compression | **None** (no UPX or similar). Installer payloads use the formats' standard cabinet/LZMA compression | release profile in `src-tauri/Cargo.toml` |
 
+## Final release re-audit: observed facts
+
+Observed on fresh `windows-latest` VMs (Windows Server 2025 Datacenter 10.0.26100, WebView2 153.0.4234.48), from
+CI run [37281442442](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37281442442)
+on commit `c91016c`, 3 of 3 attempts. Both installers were installed, run and uninstalled each time. The Rust host
+(`src-tauri/`) is byte-identical at the current release candidate. For the newer test coverage added since (the
+`/p` host window, `/c`, keyboard dismissal, offline run, import tables), see the *Current status* in
+[docs/RELEASE.md](docs/RELEASE.md#current-status).
+
+The two columns describe different things. **Soundwavian Field** is what this application's own code does or ships.
+**WebView2 / Windows** is normal behaviour of Microsoft's runtime or the OS that any WebView2 application shares.
+
+| Area | Soundwavian Field (application-authored) | WebView2 / Windows (not authored by this app) |
+| --- | --- | --- |
+| Executables included | Observed: `SoundwavianField.exe`, `SoundwavianField.scr` (10.1 MB each, same compiled binary); NSIS also adds `uninstall.exe` (79 KB). Nothing else | — |
+| DLLs / native modules | Observed: **no** `.dll`/`.sys` files installed. The WebView2 loader is linked statically | WebView2 Runtime DLLs live in Microsoft's own runtime folder, serviced by Microsoft |
+| WebView2 usage | Renders one locally embedded page per window. InPrivate profile; SmartScreen URL checks, background networking, component updates, domain reliability, sync, pings and crash upload disabled by switch | The runtime starts its usual helper processes (observed: 6 `msedgewebview2.exe`) |
+| Child processes | Observed: only `msedgewebview2.exe` under the app. `control.exe` only when the user clicks *Screen Saver Settings…* | Helpers drain within 0.5 s of exit (observed) |
+| Registry writes | Installers: uninstall registration and shortcut bookkeeping only (MSI `Registry` table empty). App: `HKCU\Control Panel\Desktop\SCRNSAVE.EXE` **only on the user's click** | Windows Installer/Explorer bookkeeping; `ScreenSaveActive` written by Windows itself via `SystemParametersInfo` |
+| Filesystem writes | `C:\Program Files\Soundwavian Field\` (installer); `%APPDATA%\com.soundwavian.field\settings.json` (app) | WebView2 profile folder `%LOCALAPPDATA%\com.soundwavian.field\EBWebView\` created by the runtime |
+| Network endpoints | **None.** No HTTP/socket code compiled in (audited dependency graph), CSP `connect-src` limited to in-process IPC. Observed: **0** non-loopback TCP/UDP sockets from the app and its WebView2 processes during `/s` | The shared WebView2 Runtime and Windows are updated by Microsoft's own updaters on their own schedule. That traffic isn't caused by this application |
+| Administrator rights | Installer only (per-machine install to Program Files). Executables run `asInvoker` | UAC prompt shown by Windows |
+| Services | **None** (observed: no new service after install or uninstall) | — |
+| Scheduled tasks | **None** (observed) | — |
+| Run keys | **None** (observed) | — |
+| Startup items | **None** (observed) | — |
+| Runtime downloads | **None.** No updater; WebView2 install mode `skip` (the bootstrapper download code in Tauri's NSIS template is compiled out) | — |
+| Temporary executable execution | **None** by the app | The NSIS *uninstaller* copies itself to `%TEMP%` to delete the install folder (standard NSIS behaviour) |
+| PowerShell | **Never** launched (observed child-process list) | — |
+| CMD | **Never** launched (observed child-process list) | — |
+| Packers / compressors | No executable packer (no UPX or similar step in the pipeline). Installer payloads use the formats' standard MSI cabinet / NSIS LZMA compression | — |
+| Updater | **None** | — |
+| Analytics / telemetry | **None.** The offline audit fails on telemetry APIs. *Copy Diagnostics* writes only to the local clipboard on a user keypress | Windows diagnostic-data settings apply to the OS, not to this app |
+| Defender | Observed: "found no threats" for the setup.exe, MSI, `.scr` and `.exe` (3 of 3 attempts) | — |
+
+**Precise network statement:** the Soundwavian Field application logic performs no runtime network requests and
+needs no network functionality during normal screensaver operation. It doesn't claim to control what the
+Microsoft WebView2 Runtime or Windows do internally on their own schedules.
+
 ## 1. Every executable shipped
 
 | File | What it is |

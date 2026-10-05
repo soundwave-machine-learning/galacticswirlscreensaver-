@@ -107,6 +107,8 @@ jobs:
           if ($LASTEXITCODE -eq 0) { throw 'sign.mjs ran without a certificate' }
           Write-Host "sign.mjs without certificate: exit $LASTEXITCODE (refused, as required)"
           if (-not (Test-Path dist/release/SoundwavianField.exe)) { throw 'guard test damaged the release output' }
+          # The refusals above leave $LASTEXITCODE = 1 on purpose; the step itself succeeded.
+          exit 0
 
       - name: Clippy (deny warnings)
         shell: pwsh

@@ -183,13 +183,6 @@ function Wait-WindowTitle($proc, [string] $pattern, [int] $seconds) {
   return $null
 }
 
-function Move-Mouse {
-  foreach ($pt in @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))) {
-    [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($pt[0], $pt[1])
-    Start-Sleep -Milliseconds 400
-  }
-}
-
 function Press-Key {
   [SField.Native]::keybd_event(0x41, 0, 0, [UIntPtr]::Zero)   # 'A' down
   Start-Sleep -Milliseconds 60
@@ -222,13 +215,33 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
   $uniq = @($sockets | Sort-Object -Unique)
   Check ($uniq.Count -eq 0) "$label`: no network sockets opened by the app or its WebView2 processes $(if ($uniq.Count) { '-> ' + ($uniq -join '; ') })"
   if (-not $proc.HasExited) {
+    # What the user experiences is the screen being handed back: the app hides
+    # its windows the moment input is detected, then exits (2 s watchdog).
+    $proc.Refresh()
+    $hadWindow = $proc.MainWindowHandle -ne [IntPtr]::Zero
+    $moves = @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))
+    $mi = 0; $nextMove = 0; $pressed = $false; $released = $null
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    if ($dismiss -eq 'keyboard') { Press-Key } else { Move-Mouse }
-    $ok = $proc.WaitForExit(15000)
-    $secs = [math]::Round($sw.Elapsed.TotalSeconds, 1)
-    $budget = if ($dismiss -eq 'keyboard') { 3.0 } else { 4.5 }
-    Check $ok "$label`: $dismiss input ends the screen saver ($(if ($ok) { "exited after $secs s, code $($proc.ExitCode)" } else { 'still running after 15 s' }))"
-    if ($ok) { Check ($secs -le $budget) "$label`: ends promptly (<= $budget s$(if ($dismiss -ne 'keyboard') { ' incl. 1.6 s of scripted movement' }); took $secs s)" }
+    while ($sw.Elapsed.TotalSeconds -lt 15) {
+      if ($dismiss -eq 'mouse' -and $mi -lt $moves.Count -and $sw.ElapsedMilliseconds -ge $nextMove) {
+        [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($moves[$mi][0], $moves[$mi][1]); $mi++; $nextMove += 400
+      }
+      if ($dismiss -eq 'keyboard' -and -not $pressed) { Press-Key; $pressed = $true }
+      $proc.Refresh()
+      if ($null -eq $released -and ($proc.HasExited -or ($hadWindow -and $proc.MainWindowHandle -eq [IntPtr]::Zero))) { $released = $sw.Elapsed.TotalSeconds }
+      if ($proc.HasExited) { break }
+      Start-Sleep -Milliseconds 50
+    }
+    $ok = $proc.HasExited
+    $secs = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+    Check $ok "$label`: $dismiss input ends the screen saver ($(if ($ok) { "process exited after $secs s, code $($proc.ExitCode)" } else { 'still running after 15 s' }))"
+    if ($null -ne $released) {
+      $r = [math]::Round($released, 2)
+      Check ($released -le 1.5) "$label`: screen handed back within 1.5 s of the input (window hidden after $r s$(if (-not $hadWindow) { '; measured as process exit' }))"
+    } else {
+      Check $false "$label`: screen handed back (window never hid)"
+    }
+    if ($ok) { Check ($secs -le 6) "$label`: process gone within 6 s of the input (2 s watchdog + teardown; took $secs s)" }
   }
   if (-not $proc.HasExited) { Stop-Process -Id $proc.Id }
   Test-Drained $tree $label
@@ -327,7 +340,8 @@ $proc = Start-Direct $scr "/p $hostHwnd"
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 while ($sw.Elapsed.TotalSeconds -lt 14 -and -not $proc.HasExited) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 50 }
 Check (-not $proc.HasExited) "/p keeps running while its host window exists"
-$child = [SField.Native]::FindWindowExW($form.Handle, [IntPtr]::Zero, $null, $null)
+# [NullString]::Value - a plain $null would be marshalled as "" (an empty class name).
+$child = [SField.Native]::FindWindowExW($form.Handle, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
 $childPid = 0
 if ($child -ne [IntPtr]::Zero) { [void][SField.Native]::GetWindowThreadProcessId($child, [ref]$childPid) }
 Check ($child -ne [IntPtr]::Zero -and $childPid -eq $proc.Id) "/p places a child window inside the host (owner pid $childPid)"
