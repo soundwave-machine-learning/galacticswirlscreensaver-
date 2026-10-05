@@ -20,6 +20,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web:
     runs-on: ubuntu-latest
@@ -85,8 +89,23 @@ jobs:
         run: ./scripts/windows/smoke-test.ps1 -Installer (Get-ChildItem dist/release/*.msi).FullName
 
       - name: Install / run / uninstall smoke test (EXE installer)
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: ./scripts/windows/smoke-test.ps1 -Installer (Get-ChildItem dist/release/*-setup.exe).FullName
+
+      - name: Print reports into the log
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          foreach ($f in 'build-info.json', 'SHA256SUMS.txt', 'defender-scan.txt', 'smoke-test-msi.txt', 'smoke-test-nsis.txt') {
+            $p = Join-Path dist/release $f
+            if (Test-Path $p) { Write-Host "`n===== $f ====="; Get-Content $p | Write-Host }
+          }
+          $nsi = 'dist/release/inspection/nsis-installer.nsi'
+          if (Test-Path $nsi) {
+            Write-Host "`n===== NSIS installer: registry, shortcuts, exec ====="
+            Select-String -Path $nsi -Pattern 'WriteReg|DeleteReg|CreateShortcut|Exec|nsExec|ExecShell|Download' | ForEach-Object { Write-Host ("{0,5}: {1}" -f $_.LineNumber, $_.Line.Trim()) }
+          }
 
       - name: Remove signing certificate
         if: ${{ always() && inputs.signed }}

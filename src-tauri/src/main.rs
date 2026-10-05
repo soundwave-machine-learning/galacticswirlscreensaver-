@@ -19,6 +19,7 @@ mod win;
 
 use mode::Mode;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -34,6 +35,7 @@ const SCR_NAME: &str = "SoundwavianField.scr";
 
 static MODE: OnceLock<Mode> = OnceLock::new();
 static STARTED: OnceLock<Instant> = OnceLock::new();
+static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
 
 fn invoked_as_scr() -> bool {
     std::env::current_exe()
@@ -254,15 +256,26 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Safety net for full-screen mode: if the primary screen saver
-            // window loses focus (Alt+Tab, Win key, Ctrl+Alt+Del, a
-            // notification stealing focus) the screen saver ends, even if
-            // the page itself has stopped responding.
-            if let (Some(Mode::Screensaver), WindowEvent::Focused(false)) = (MODE.get(), event) {
-                let settled = STARTED.get().map(|t| t.elapsed() > Duration::from_secs(2)).unwrap_or(true);
-                if settled && window.label() == "screen0" {
-                    window.app_handle().exit(0);
+            // Safety net for full-screen mode: once the primary screen saver
+            // window has had focus, losing it (Alt+Tab, Win key,
+            // Ctrl+Alt+Del, a notification stealing focus) ends the screen
+            // saver, even if the page itself has stopped responding. It
+            // never fires for a window that did not get focus to begin with.
+            if !matches!(MODE.get(), Some(Mode::Screensaver)) || window.label() != "screen0" {
+                return;
+            }
+            match event {
+                WindowEvent::Focused(true) => HAD_FOCUS.store(true, Ordering::SeqCst),
+                WindowEvent::Focused(false) => {
+                    let settled = STARTED
+                        .get()
+                        .map(|t| t.elapsed() > Duration::from_secs(2))
+                        .unwrap_or(true);
+                    if settled && HAD_FOCUS.load(Ordering::SeqCst) {
+                        window.app_handle().exit(0);
+                    }
                 }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

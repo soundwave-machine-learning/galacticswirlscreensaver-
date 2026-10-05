@@ -68,6 +68,36 @@ function Get-PersistenceSnapshot {
 
 function Compare-Set($before, $after) { @($after | Where-Object { $before -notcontains $_ }) }
 
+# Start a process with CreateProcess semantics and an exact argument string -
+# the way Windows starts a screen saver. (Start-Process goes through
+# ShellExecute, whose "open" verb for .scr files is `"%1" /S`, which would
+# replace the arguments under test.)
+function Start-Direct([string] $file, [string] $arguments) {
+  $psi = [System.Diagnostics.ProcessStartInfo]::new($file, $arguments)
+  $psi.UseShellExecute = $false
+  [System.Diagnostics.Process]::Start($psi)
+}
+
+# Mean colour of the primary screen - proves something was actually drawn.
+function Measure-Screen([string] $savePath) {
+  Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+  $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+  $bmp = [System.Drawing.Bitmap]::new($b.Width, $b.Height)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+  $sum = 0.0; $n = 0; $lit = 0
+  for ($y = 0; $y -lt $b.Height; $y += 8) {
+    for ($x = 0; $x -lt $b.Width; $x += 8) {
+      $c = $bmp.GetPixel($x, $y)
+      $l = 0.2126 * $c.R + 0.7152 * $c.G + 0.0722 * $c.B
+      $sum += $l; $n++; if ($l -gt 24) { $lit++ }
+    }
+  }
+  if ($savePath) { $bmp.Save($savePath, [System.Drawing.Imaging.ImageFormat]::Png) }
+  $g.Dispose(); $bmp.Dispose()
+  [pscustomobject]@{ Width = $b.Width; Height = $b.Height; MeanLuma = [math]::Round($sum / [math]::Max(1, $n), 1); LitFraction = [math]::Round($lit / [math]::Max(1, $n), 3) }
+}
+
 function Get-ProcessTree([int] $rootId) {
   $all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine
   $ids = [System.Collections.Generic.HashSet[int]]::new()
@@ -113,7 +143,7 @@ if (Test-Path $exe) {
   $vi = (Get-Item $exe).VersionInfo
   Log "  Version info: Product='$($vi.ProductName)' Company='$($vi.CompanyName)' Description='$($vi.FileDescription)' Original='$($vi.OriginalFilename)' Version=$($vi.FileVersion) Copyright='$($vi.LegalCopyright)'"
   $same = (Get-FileHash $exe).Hash -eq (Get-FileHash $scr).Hash
-  Log "  exe/scr byte-identical: $same (a signed build may differ only in its signature block)"
+  Log "  exe/scr identical bytes: $same (the bundler stamps an installer-type marker into its copy of the exe)"
 }
 
 Log "`n[3] Persistence after install"
@@ -125,29 +155,47 @@ foreach ($kindName in 'Services', 'Tasks', 'Run', 'Startup') {
 
 Log "`n[4] Screen saver argument handling"
 foreach ($a in @('/a', '/p 0', '/p 999999')) {
-  $proc = Start-Process $scr -ArgumentList $a -PassThru
+  $proc = Start-Direct $scr $a
   $exited = $proc.WaitForExit(10000)
   if (-not $exited) { Stop-Process -Id $proc.Id -Force }
   Check $exited "'$a' exits on its own"
 }
 
 Log "`n[5] Full-screen run (/s) for $RunSeconds s"
-$proc = Start-Process $scr -ArgumentList '/s' -PassThru
+$proc = Start-Direct $scr '/s'
 $conns = @()
 $tree = @()
+$shot = $null
 for ($i = 0; $i -lt $RunSeconds; $i++) {
   Start-Sleep -Seconds 1
   if ($proc.HasExited) { break }
+  if ($i -eq 10) {
+    try { $shot = Measure-Screen (Join-Path (Split-Path $Installer) "screensaver-$kind.png") } catch { Log "  (screen capture unavailable: $_)" }
+  }
   $tree = @(Get-ProcessTree $proc.Id)
   $ids = $tree.ProcessId
   $conns += @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess -and $_.RemoteAddress -notin @('127.0.0.1', '::1', '0.0.0.0', '::') })
   $conns += @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess -and $_.LocalAddress -notin @('127.0.0.1', '::1') })
 }
 Check (-not $proc.HasExited) "/s keeps running until dismissed (exit code: $(if ($proc.HasExited) { $proc.ExitCode } else { 'running' }))"
+if ($shot) {
+  Log "  screen $($shot.Width)x$($shot.Height): mean luma $($shot.MeanLuma), lit fraction $($shot.LitFraction)"
+  Check ($shot.MeanLuma -gt 8) 'the field is visibly rendered on screen'
+}
 Log "  process tree:"
 foreach ($t in $tree) { Log ("    {0,6} {1}" -f $t.ProcessId, $t.Name) }
 Check ($conns.Count -eq 0) "no network sockets opened by the app or its WebView2 processes $(if ($conns.Count) { '-> ' + (($conns | ForEach-Object { "$($_.OwningProcess) $($_.RemoteAddress):$($_.RemotePort)$($_.LocalPort)" }) -join '; ') })"
 
+# Real mouse movement must dismiss it (SetCursorPos generates WM_MOUSEMOVE).
+if (-not $proc.HasExited) {
+  Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+  foreach ($pt in @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))) {
+    [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($pt[0], $pt[1])
+    Start-Sleep -Milliseconds 400
+  }
+  $dismissed = $proc.WaitForExit(8000)
+  Check $dismissed 'moving the mouse ends the screen saver'
+}
 # Ending the main process must take every child with it (no lingering processes).
 if (-not $proc.HasExited) { Stop-Process -Id $proc.Id }
 Start-Sleep -Seconds 6
