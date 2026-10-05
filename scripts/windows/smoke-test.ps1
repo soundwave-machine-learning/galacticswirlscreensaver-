@@ -77,6 +77,9 @@ public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
 public static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
 public static uint LastInputTick() { var i = new LASTINPUTINFO(); i.cbSize = 8; GetLastInputInfo(ref i); return i.dwTime; }
 public static uint ForegroundPid() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
+[DllImport("dwmapi.dll")]
+public static extern int DwmGetWindowAttribute(System.IntPtr hwnd, int attr, out int value, int size);
+public static bool IsCloaked(System.IntPtr hwnd) { int v; return DwmGetWindowAttribute(hwnd, 14, out v, 4) == 0 && v != 0; }
 '@
 
 # ---------------------------------------------------------------------------
@@ -226,7 +229,8 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     # What the user experiences is the screen being handed back: the app hides
     # its windows the moment input is detected, then exits (1 s watchdog).
     $proc.Refresh()
-    $hadWindow = $proc.MainWindowHandle -ne [IntPtr]::Zero
+    $hwndBefore = $proc.MainWindowHandle
+    $hadWindow = $hwndBefore -ne [IntPtr]::Zero
     $moves = @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))
     $mi = 0; $nextMove = 0; $pressed = $false; $released = $null
     $fgPid = [SField.Native]::ForegroundPid()
@@ -243,7 +247,8 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
         Log "  injected key: last-input tick $tickBefore -> $tickAfter ($(if ($tickAfter -ne $tickBefore) { 'registered by Windows' } else { 'NOT registered - synthetic input did not reach this session' }))"
       }
       $proc.Refresh()
-      if ($null -eq $released -and ($proc.HasExited -or ($hadWindow -and $proc.MainWindowHandle -eq [IntPtr]::Zero))) { $released = $sw.Elapsed.TotalSeconds }
+      # Handed back = hidden, cloaked by DWM (off screen at composition level), or exited.
+      if ($null -eq $released -and ($proc.HasExited -or ($hadWindow -and ($proc.MainWindowHandle -eq [IntPtr]::Zero -or [SField.Native]::IsCloaked($hwndBefore))))) { $released = $sw.Elapsed.TotalSeconds }
       if ($proc.HasExited) { if ($null -eq $released) { $released = $sw.Elapsed.TotalSeconds }; break }
       Start-Sleep -Milliseconds 50
     }
