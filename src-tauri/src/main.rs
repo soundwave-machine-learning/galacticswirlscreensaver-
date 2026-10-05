@@ -21,7 +21,7 @@ use mode::Mode;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 /// Chromium switches for the embedded WebView2: keep the defaults wry uses
@@ -33,8 +33,13 @@ const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreen
 
 const SCR_NAME: &str = "SoundwavianField.scr";
 
+/// Exit code when the screen saver ends because another application took
+/// the foreground (0 = dismissed by input). Windows ignores screen saver
+/// exit codes; this only makes the two paths distinguishable in tests.
+#[cfg(windows)]
+const EXIT_FOCUS_LOST: i32 = 2;
+
 static MODE: OnceLock<Mode> = OnceLock::new();
-static STARTED: OnceLock<Instant> = OnceLock::new();
 static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
 
 fn invoked_as_scr() -> bool {
@@ -229,7 +234,6 @@ fn main() {
         }
     }
     let _ = MODE.set(mode);
-    let _ = STARTED.set(Instant::now());
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -256,24 +260,30 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Safety net for full-screen mode: once the primary screen saver
-            // window has had focus, losing it (Alt+Tab, Win key,
-            // Ctrl+Alt+Del, a notification stealing focus) ends the screen
-            // saver, even if the page itself has stopped responding. It
-            // never fires for a window that did not get focus to begin with.
+            // Safety net for full-screen mode: if another application takes
+            // the foreground (Alt+Tab, Win key, a notification) or the
+            // secure desktop appears (Ctrl+Alt+Del), the screen saver ends -
+            // even if the page itself has stopped responding. Focus moving
+            // between our window and its WebView2 child is ignored, and the
+            // check runs only after the window has actually been focused.
             if !matches!(MODE.get(), Some(Mode::Screensaver)) || window.label() != "screen0" {
                 return;
             }
             match event {
                 WindowEvent::Focused(true) => HAD_FOCUS.store(true, Ordering::SeqCst),
+                #[cfg(windows)]
                 WindowEvent::Focused(false) => {
-                    let settled = STARTED
-                        .get()
-                        .map(|t| t.elapsed() > Duration::from_secs(2))
-                        .unwrap_or(true);
-                    if settled && HAD_FOCUS.load(Ordering::SeqCst) {
-                        window.app_handle().exit(0);
+                    if !HAD_FOCUS.load(Ordering::SeqCst) {
+                        return;
                     }
+                    let handle = window.app_handle().clone();
+                    std::thread::spawn(move || {
+                        // Let focus settle before deciding.
+                        std::thread::sleep(Duration::from_millis(400));
+                        if !win::foreground_is_ours() {
+                            handle.exit(EXIT_FOCUS_LOST);
+                        }
+                    });
                 }
                 _ => {}
             }

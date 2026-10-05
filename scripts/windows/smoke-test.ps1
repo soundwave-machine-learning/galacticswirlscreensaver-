@@ -162,6 +162,8 @@ foreach ($a in @('/a', '/p 0', '/p 999999')) {
 }
 
 Log "`n[5] Full-screen run (/s) for $RunSeconds s"
+# Always test the first-launch case: WebView2 creates its profile from scratch.
+Remove-Item (Join-Path $env:LOCALAPPDATA 'com.soundwavian.field') -Recurse -Force -ErrorAction SilentlyContinue
 $proc = Start-Direct $scr '/s'
 $conns = @()
 $tree = @()
@@ -177,7 +179,8 @@ for ($i = 0; $i -lt $RunSeconds; $i++) {
   $conns += @(Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess -and $_.RemoteAddress -notin @('127.0.0.1', '::1', '0.0.0.0', '::') })
   $conns += @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue | Where-Object { $ids -contains $_.OwningProcess -and $_.LocalAddress -notin @('127.0.0.1', '::1') })
 }
-Check (-not $proc.HasExited) "/s keeps running until dismissed (exit code: $(if ($proc.HasExited) { $proc.ExitCode } else { 'running' }))"
+$why = if (-not $proc.HasExited) { 'running' } elseif ($proc.ExitCode -eq 2) { 'exit 2 = another window took the foreground' } else { "exit $($proc.ExitCode) = dismissed by input or failed to start" }
+Check (-not $proc.HasExited) "/s keeps running until dismissed ($why)"
 if ($shot) {
   Log "  screen $($shot.Width)x$($shot.Height): mean luma $($shot.MeanLuma), lit fraction $($shot.LitFraction)"
   Check ($shot.MeanLuma -gt 8) 'the field is visibly rendered on screen'

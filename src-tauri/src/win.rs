@@ -9,8 +9,8 @@ use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Storage::FileSystem::GetShortPathNameW;
 use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsWindow, SystemParametersInfoW, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
-    SPI_SETSCREENSAVEACTIVE,
+    GetClientRect, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SystemParametersInfoW,
+    SPIF_SENDCHANGE, SPIF_UPDATEINIFILE, SPI_SETSCREENSAVEACTIVE,
 };
 
 pub fn hwnd(raw: isize) -> HWND {
@@ -21,6 +21,22 @@ pub fn hwnd(raw: isize) -> HWND {
 /// process as soon as the Screen Saver Settings dialog closes).
 pub fn window_alive(raw: isize) -> bool {
     unsafe { IsWindow(Some(hwnd(raw))).as_bool() }
+}
+
+/// True when the foreground window belongs to this process. Keyboard focus
+/// moving between our own window and its embedded WebView2 child is not
+/// "the user switched away"; another process (or the secure desktop, which
+/// leaves no foreground window) is.
+pub fn foreground_is_ours() -> bool {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.0.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        pid == std::process::id()
+    }
 }
 
 /// Client-area size of the preview host window, in physical pixels.
