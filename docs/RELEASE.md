@@ -13,7 +13,7 @@ source
   → bundle MSI + NSIS installers                   [Tauri signs uninstaller + installers in signed builds]
   → verify signatures (signtool verify /pa /all)   [signed builds]
   → Microsoft Defender scan (MpCmdRun)             [when available]
-  → SHA-256 manifest, build-info.json, VERSION.txt
+  → SHA-256 manifest (after signing), BUILD_INFO.txt, README-FIRST.txt, reports/build-info.json
   → static inspection (MSI tables, payload, signatures)   scripts/windows/inspect-release.ps1
   → clean-machine install / run / uninstall test          scripts/windows/smoke-test.ps1
   → release
@@ -26,8 +26,8 @@ npm ci
 npm run release:signed                     # or `npm run release` for an unsigned DEVELOPMENT build
 pwsh scripts\windows\inspect-release.ps1
 # on a clean Windows 10/11 VM, elevated:
-pwsh scripts\windows\smoke-test.ps1 -Installer .\SoundwavianField-0.1.0-x64.msi
-pwsh scripts\windows\smoke-test.ps1 -Installer .\SoundwavianField-0.1.0-x64-setup.exe
+pwsh scripts\windows\smoke-test.ps1 -Installer .\SoundwavianField-0.1.0.msi
+pwsh scripts\windows\smoke-test.ps1 -Installer .\SoundwavianField-Setup-0.1.0.exe
 ```
 
 ### Reproducibility
@@ -48,12 +48,12 @@ build (same SHA-256s).
 | --- | --- | --- |
 | Clean production build | `npm run release` finishes with no errors | ✅ CI |
 | No unexpected networking | offline audit (bundle + native graph + config) and the smoke test's socket watch during `/s` | ✅ CI |
-| No hidden scripts | MSI `CustomAction` table + generated NSIS source reviewed (`dist/release/inspection/`) | ✅ table dump in CI; review is manual |
+| No hidden scripts | MSI `CustomAction` table + generated NSIS source reviewed (`dist/release/reports/installer-sources/`) | ✅ table dump in CI; review is manual |
 | No executable packer | release profile; PE inspection | ✅ by construction |
 | Conventional installer | Tauri's standard WiX MSI + NSIS | ✅ |
 | Uninstall works | smoke test step 6 | ✅ CI (MSI + NSIS) |
 | Normal Windows metadata | smoke test prints ProductName, CompanyName, FileDescription, OriginalFilename, version, copyright | ✅ CI (check the values) |
-| Defender scan clean | `defender-scan.txt` (MpCmdRun custom scan of every artifact) | ✅ CI; repeat for the signed build on the release machine |
+| Defender scan clean | `reports/defender-scan.txt` (MpCmdRun custom scan of every artifact) | ✅ CI; repeat for the signed build on the release machine |
 | Clean-machine / VM install tested | [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) on Windows 11 and 10, plus the smoke test on a fresh VM | ❌ manual |
 | `.scr` invocation behaviour tested | unit tests + smoke test (`/a`, `/p` with an invalid HWND, `/s`) + **manual** checks of `/c`, the live preview in the Screen Saver dialog, and dismiss-on-input | ⚠️ partly manual |
 | Application exits completely | smoke test: no descendant process survives the main process | ✅ CI; also check after dismissing with the mouse |

@@ -21,7 +21,7 @@ and once on **Windows 10** if you have one.
 | Graphics card (overlay line `gpu …`, or Task Manager → Performance → GPU) | | |
 | Monitors: count, resolution, scaling % (Settings → System → Display) | | |
 | Installer tested (MSI or setup.exe) + its SHA-256 | | |
-| Build commit (from `VERSION.txt`) | | |
+| Build commit (from `BUILD_INFO.txt`) | | |
 
 ---
 
@@ -31,9 +31,9 @@ and once on **Windows 10** if you have one.
   `soundwavian-field-windows` → unzip it to a folder.
 - [ ] **Verify SHA-256.** In that folder, Shift + right-click → *Open in
   Terminal* (or PowerShell) and run:
-  `Get-FileHash .\SoundwavianField-*-x64.msi -Algorithm SHA256`
+  `Get-FileHash .\SoundwavianField-Setup-*.exe -Algorithm SHA256`
   *The hash matches that file's line in `SHA256SUMS.txt`, character for character.*
-  Do the same for the `-setup.exe` if you test it.
+  Do the same for the `.msi` if you test it. (`README-FIRST.txt` in the same folder explains this too.)
 - [ ] **Run the installer** (double-click it).
 - [ ] **Record exactly what SmartScreen shows.** Copy the wording and note the
   buttons. An unsigned build is *expected* to show "Windows protected your

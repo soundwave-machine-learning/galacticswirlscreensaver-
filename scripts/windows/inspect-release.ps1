@@ -9,15 +9,27 @@
   change the installer can make: files, registry, shortcuts, services,
   custom actions, environment, and scheduled/elevated work.
 
-  Output: dist\release\inspection.txt (plus the generated WiX / NSIS
-  sources copied into dist\release\inspection\ by the release script).
+  Output: dist\release\reports\inspection.txt (the generated WiX / NSIS
+  sources are copied into dist\release\reports\installer-sources\ by the
+  release script).
 #>
 param(
   [string] $ReleaseDir = (Join-Path $PSScriptRoot '..\..\dist\release')
 )
 $ErrorActionPreference = 'Stop'
 $ReleaseDir = (Resolve-Path $ReleaseDir).Path
+$reports = Join-Path $ReleaseDir 'reports'
+New-Item -ItemType Directory -Force -Path $reports | Out-Null
 $out = [System.Collections.Generic.List[string]]::new()
+
+# dumpbin ships with the Visual C++ build tools; it is not on PATH by default.
+$dumpbin = (Get-Command dumpbin.exe -ErrorAction SilentlyContinue).Source
+if (-not $dumpbin) {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  if (Test-Path $vswhere) {
+    $dumpbin = & $vswhere -latest -products * -find 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+  }
+}
 function Log([string] $m) { Write-Host $m; $out.Add($m) }
 
 $msi = Get-ChildItem $ReleaseDir -Filter *.msi | Select-Object -First 1
@@ -87,11 +99,13 @@ Get-ChildItem $extract -Recurse -File | Where-Object { $_.Extension -ne '.msi' }
   $vi = $_.VersionInfo
   Log ("  {0,-30} {1,11:N0} B  PE={2,-5} sig={3,-10} '{4}' {5} orig='{6}'" -f $_.Name, $_.Length, $isPe, $sig.Status, $vi.FileDescription, $vi.FileVersion, $vi.OriginalFilename)
   if ($isPe) {
-    # Imported DLLs (requires dumpbin from the Windows SDK / VS Build Tools if present)
-    $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
     if ($dumpbin) {
-      $deps = & $dumpbin.Source /nologo /dependents $_.FullName | Where-Object { $_ -match '^\s+\S+\.(dll|DLL)$' } | ForEach-Object { $_.Trim() }
-      Log "      imports: $($deps -join ', ')"
+      $deps = & $dumpbin /nologo /dependents $_.FullName | Where-Object { $_ -match '^\s+\S+\.(dll|DLL)$' } | ForEach-Object { $_.Trim().ToLower() } | Sort-Object -Unique
+      Log "      imported DLLs ($($deps.Count)): $($deps -join ', ')"
+      $sections = & $dumpbin /nologo /headers $_.FullName | Select-String -Pattern 'SECTION HEADER #\d+' -Context 0, 1 | ForEach-Object { $_.Context.PostContext[0].Trim().Split(' ')[0] }
+      Log "      PE sections: $($sections -join ', ')  (UPX/packers would show UPX0/UPX1/.aspack/etc.)"
+    } else {
+      Log '      (dumpbin not found - import table not inspected)'
     }
   }
 }
@@ -104,5 +118,5 @@ Get-ChildItem $ReleaseDir -File | Where-Object { $_.Extension -in '.exe', '.scr'
   Log ("  {0,-40} {1,-12} {2}" -f $_.Name, $s.Status, $s.SignerCertificate.Subject)
 }
 
-$out | Set-Content -Path (Join-Path $ReleaseDir 'inspection.txt') -Encoding utf8
-Log "`nWrote $(Join-Path $ReleaseDir 'inspection.txt')"
+$out | Set-Content -Path (Join-Path $reports 'inspection.txt') -Encoding utf8
+Log "`nWrote $(Join-Path $reports 'inspection.txt')"

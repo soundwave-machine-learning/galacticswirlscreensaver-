@@ -183,11 +183,10 @@ npm run app:dev            # run the desktop app against the dev server
 
 `dist/release/` then contains:
 
-- `SoundwavianField-<ver>-x64.msi` and `SoundwavianField-<ver>-x64-setup.exe` (installers)
+- `SoundwavianField-Setup-<ver>.exe` (recommended installer) and `SoundwavianField-<ver>.msi` (managed deployment)
 - `SoundwavianField.exe` and `SoundwavianField.scr`
-- `SHA256SUMS.txt`, `build-info.json`, `VERSION.txt`
-- `inspection/` (the generated WiX and NSIS installer sources)
-- `defender-scan.txt` when Microsoft Defender is available on the build machine
+- `SHA256SUMS.txt`, `BUILD_INFO.txt`, `README-FIRST.txt` (plain-language install/verify guide)
+- `reports/`: `build-info.json`, `defender-scan.txt`, `inspection.txt`, release-test reports and screenshots, and the generated WiX/NSIS installer sources
 
 Full details are in these docs:
 

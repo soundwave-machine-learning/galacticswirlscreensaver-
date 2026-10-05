@@ -127,6 +127,17 @@ mkdirSync(stageDir, { recursive: true });
 // standard /s /c /p arguments. Copied after signing, so it carries the
 // same Authenticode signature.
 copyFileSync(exePath, join(stageDir, SCR));
+if (SIGNED) {
+  step('Verify signatures of SoundwavianField.exe and SoundwavianField.scr');
+  for (const f of [exePath, join(stageDir, SCR)]) {
+    const v = verifyFile(f);
+    console.log(`${v.ok ? 'ok ' : 'BAD'} ${f}`);
+    if (!v.ok) {
+      console.error(v.output);
+      throw new Error(`Signature verification failed for ${f} - a signed release never falls back to unsigned files.`);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 step('Bundle installers (MSI + EXE)');
@@ -147,17 +158,28 @@ overlays.push(generated);
 run('npx', ['tauri', 'bundle', '--bundles', 'msi,nsis', ...overlays.flatMap((c) => ['--config', c])]);
 
 // ---------------------------------------------------------------------------
+// Release layout (what an ordinary user sees first):
+//   SoundwavianField-Setup-<v>.exe   recommended installer
+//   SoundwavianField-<v>.msi         for managed / enterprise deployment
+//   SoundwavianField.exe / .scr      the program itself (portable copies)
+//   SHA256SUMS.txt  BUILD_INFO.txt  README-FIRST.txt
+//   reports/                         Defender output, build-info.json,
+//                                    generated installer sources, test reports
 step('Collect release artifacts');
 rmSync(releaseDir, { recursive: true, force: true });
 mkdirSync(releaseDir, { recursive: true });
+const reportsDir = join(releaseDir, 'reports');
+mkdirSync(join(reportsDir, 'installer-sources'), { recursive: true });
+const SETUP_NAME = `SoundwavianField-Setup-${version}.exe`;
+const MSI_NAME = `SoundwavianField-${version}.msi`;
 const bundleDir = join(targetDir, 'bundle');
 const found = [];
 for (const sub of ['msi', 'nsis']) {
   const dir = join(bundleDir, sub);
   if (!existsSync(dir)) continue;
   for (const f of readdirSync(dir)) {
-    if (sub === 'msi' && f.endsWith('.msi')) found.push({ src: join(dir, f), name: `SoundwavianField-${version}-x64.msi` });
-    if (sub === 'nsis' && f.endsWith('-setup.exe')) found.push({ src: join(dir, f), name: `SoundwavianField-${version}-x64-setup.exe` });
+    if (sub === 'msi' && f.endsWith('.msi')) found.push({ src: join(dir, f), name: MSI_NAME });
+    if (sub === 'nsis' && f.endsWith('-setup.exe')) found.push({ src: join(dir, f), name: SETUP_NAME });
   }
 }
 if (found.length !== 2) throw new Error(`Expected an MSI and an EXE installer, found: ${found.map((f) => f.src).join(', ')}`);
@@ -165,30 +187,29 @@ for (const f of found) copyFileSync(f.src, join(releaseDir, f.name));
 copyFileSync(exePath, join(releaseDir, EXE));
 copyFileSync(join(stageDir, SCR), join(releaseDir, SCR));
 
-// Keep the generated installer sources next to the artifacts so reviewers can
-// see exactly what each installer does.
-const inspection = join(releaseDir, 'inspection');
-mkdirSync(inspection, { recursive: true });
+// The generated installer sources, so reviewers can see exactly what each installer does.
 for (const [src, name] of [
   [join(targetDir, 'wix', 'x64', 'main.wxs'), 'msi-main.wxs'],
   [join(targetDir, 'nsis', 'x64', 'installer.nsi'), 'nsis-installer.nsi'],
 ]) {
-  if (existsSync(src)) copyFileSync(src, join(inspection, name));
+  if (existsSync(src)) copyFileSync(src, join(reportsDir, 'installer-sources', name));
 }
 
-const artifacts = readdirSync(releaseDir).filter((f) => statSync(join(releaseDir, f)).isFile()).sort();
+// The distributable binaries, in a fixed order.
+const artifacts = [SETUP_NAME, MSI_NAME, SCR, EXE];
+for (const f of artifacts) if (!existsSync(join(releaseDir, f))) throw new Error(`${f} missing from release`);
 
 // ---------------------------------------------------------------------------
 const signatures = {};
 if (SIGNED) {
-  step('Verify Authenticode signatures');
+  step('Verify Authenticode signatures of every distributable');
   for (const f of artifacts) {
     const v = verifyFile(join(releaseDir, f));
-    signatures[f] = v.ok ? 'valid' : 'INVALID';
+    signatures[f] = v.ok ? 'valid Authenticode signature' : 'INVALID';
     console.log(`${v.ok ? 'ok ' : 'BAD'} ${f}`);
     if (!v.ok) {
       console.error(v.output);
-      throw new Error(`Signature verification failed for ${f}`);
+      throw new Error(`Signature verification failed for ${f} - a signed release never falls back to unsigned files.`);
     }
   }
 } else {
@@ -197,68 +218,183 @@ if (SIGNED) {
 
 // ---------------------------------------------------------------------------
 step('Microsoft Defender scan (if available)');
-const mpcmd = [
-  join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Windows Defender', 'MpCmdRun.exe'),
-].find((p) => existsSync(p));
-let defender = 'not available on this machine - scan manually (see docs/RELEASE.md)';
+const mpcmd = [join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Windows Defender', 'MpCmdRun.exe')].find((p) =>
+  existsSync(p),
+);
+let defender = { available: Boolean(mpcmd), scanned: [], threatsFound: 0, incomplete: [], summary: '' };
 if (mpcmd) {
   const lines = [];
-  let threats = false;
   for (const f of artifacts) {
     const r = spawnSync(mpcmd, ['-Scan', '-ScanType', '3', '-File', join(releaseDir, f), '-DisableRemediation'], {
       encoding: 'utf8',
     });
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
     lines.push(`## ${f} (exit ${r.status})\n${out}\n`);
-    // Exit code 2 = threats found. Other non-zero codes usually mean the
-    // engine is disabled (e.g. CI images) and are reported, not hidden.
-    if (r.status === 2) threats = true;
+    defender.scanned.push(f);
+    // MpCmdRun: 0 = no threats, 2 = threats found; anything else = the scan did not complete.
+    if (r.status === 2) {
+      const m = /found (\d+) threats?/i.exec(out);
+      defender.threatsFound += m ? Number(m[1]) : 1;
+    } else if (r.status !== 0 || !/found no threats/i.test(out)) {
+      defender.incomplete.push(`${f} (exit ${r.status})`);
+    }
   }
-  writeFileSync(join(releaseDir, 'defender-scan.txt'), lines.join('\n'));
-  defender = threats ? 'THREATS REPORTED - see defender-scan.txt' : 'completed - see defender-scan.txt';
-  if (threats) console.error('Defender reported a detection. Do NOT distribute; see defender-scan.txt.');
+  writeFileSync(join(reportsDir, 'defender-scan.txt'), lines.join('\n'));
+  defender.summary = defender.threatsFound
+    ? `THREATS FOUND: ${defender.threatsFound}`
+    : defender.incomplete.length
+      ? `scan incomplete for: ${defender.incomplete.join(', ')}`
+      : `no threats found in ${defender.scanned.length} files`;
+} else {
+  defender.summary = 'Defender not available on this machine - scan manually (docs/RELEASE.md)';
 }
-console.log(defender);
+console.log(`Defender: ${defender.summary}`);
+console.log(`  scanned: ${defender.scanned.join(', ') || 'none'}`);
+console.log(`  threat count: ${defender.threatsFound}`);
 
 // ---------------------------------------------------------------------------
+// Hashes are computed LAST, from the final (signed, if --signed) files, so a
+// signed release never carries the hashes of an unsigned build.
 step('Checksums + build metadata');
-const files = artifacts
-  .filter((f) => !f.endsWith('.txt') && !f.endsWith('.json'))
-  .map((f) => {
-    const p = join(releaseDir, f);
-    return { file: f, bytes: statSync(p).size, sha256: sha256(p), signature: signatures[f] };
-  });
-writeFileSync(
-  join(releaseDir, 'SHA256SUMS.txt'),
-  files.map((f) => `${f.sha256}  ${f.file}`).join('\n') + '\n',
-);
+const files = artifacts.map((f) => {
+  const p = join(releaseDir, f);
+  return { file: f, bytes: statSync(p).size, sha256: sha256(p), signature: signatures[f] };
+});
+writeFileSync(join(releaseDir, 'SHA256SUMS.txt'), files.map((f) => `${f.sha256}  ${f.file}`).join('\n') + '\n');
+
+const tauriCrate = /name = "tauri"\r?\nversion = "([^"]+)"/.exec(readFileSync(join(tauriDir, 'Cargo.lock'), 'utf8'))?.[1];
 const toolchain = {
   node: process.version,
   rustc: capture('rustc', ['--version']),
   cargo: capture('cargo', ['--version']),
   tauriCli: capture('npx', ['tauri', '--version']),
+  tauriCrate: tauriCrate ?? null,
 };
+const ci = process.env.GITHUB_RUN_ID
+  ? {
+      workflow: process.env.GITHUB_WORKFLOW,
+      runId: process.env.GITHUB_RUN_ID,
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+      url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+    }
+  : null;
+const builtAt = new Date().toISOString();
+const publisherUsed = process.env.SFIELD_PUBLISHER || conf.bundle.publisher;
 const info = {
   product: conf.productName,
-  publisher: process.env.SFIELD_PUBLISHER || conf.bundle.publisher,
+  publisher: publisherUsed,
   identifier: conf.identifier,
   version,
   buildKind,
   signed: SIGNED,
+  target: 'x86_64-pc-windows-msvc',
   webviewInstallMode: OFFLINE_WEBVIEW ? 'offlineInstaller' : conf.bundle.windows.webviewInstallMode.type,
   git: { commit, dirty },
+  builtAt,
   sourceDateEpoch: Number(process.env.SOURCE_DATE_EPOCH),
-  builtFrom: new Date(Number(process.env.SOURCE_DATE_EPOCH) * 1000).toISOString(),
+  ci,
   toolchain,
   defender,
   files,
 };
-writeFileSync(join(releaseDir, 'build-info.json'), JSON.stringify(info, null, 2) + '\n');
-writeFileSync(join(releaseDir, 'VERSION.txt'), `${conf.productName} ${version} (${buildKind})\n${commit ?? ''}\n`);
+writeFileSync(join(reportsDir, 'build-info.json'), JSON.stringify(info, null, 2) + '\n');
+
+const pad = (k) => `${k}:`.padEnd(22);
+writeFileSync(
+  join(releaseDir, 'BUILD_INFO.txt'),
+  [
+    `${pad('Product')}${conf.productName}`,
+    `${pad('Version')}${version}`,
+    `${pad('Build kind')}${buildKind}`,
+    `${pad('Signed')}${SIGNED ? 'yes (Authenticode, verified with signtool)' : 'no'}`,
+    `${pad('Publisher metadata')}${publisherUsed}`,
+    `${pad('Git commit')}${commit ?? 'unknown'}${dirty ? ' (working tree had uncommitted changes)' : ''}`,
+    `${pad('Build timestamp')}${builtAt}`,
+    `${pad('Source date (commit)')}${new Date(Number(process.env.SOURCE_DATE_EPOCH) * 1000).toISOString()}`,
+    `${pad('CI run')}${ci ? `${ci.workflow} #${ci.runId} attempt ${ci.runAttempt} - ${ci.url}` : 'local build'}`,
+    `${pad('Target architecture')}x86_64-pc-windows-msvc (Windows 10/11 x64)`,
+    `${pad('Rust')}${toolchain.rustc ?? 'unknown'}`,
+    `${pad('Node')}${toolchain.node}`,
+    `${pad('Tauri')}crate ${toolchain.tauriCrate ?? '?'}, ${toolchain.tauriCli ?? 'cli ?'}`,
+    `${pad('WebView2 install mode')}${info.webviewInstallMode}`,
+    `${pad('Defender')}${defender.summary}`,
+    '',
+    'Files (SHA-256 also in SHA256SUMS.txt):',
+    ...files.map((f) => `  ${f.file.padEnd(36)} ${String(f.bytes).padStart(10)} bytes  ${f.sha256}  ${f.signature}`),
+    '',
+  ].join('\n'),
+);
+
+writeFileSync(join(releaseDir, 'README-FIRST.txt'), readmeFirst({ version, signed: SIGNED, setup: SETUP_NAME, msi: MSI_NAME }));
 
 console.log(`\nRelease artifacts in ${releaseDir}:`);
-for (const f of files) console.log(`  ${f.sha256}  ${f.file}  (${(f.bytes / 1e6).toFixed(1)} MB, ${f.signature})`);
+for (const f of files) console.log(`  ${f.file.padEnd(36)} ${String(f.bytes).padStart(10)} bytes  ${f.sha256}  ${f.signature}`);
 if (!SIGNED) {
   console.log('\nThis is a DEVELOPMENT build. Windows SmartScreen will warn on other PCs.');
   console.log('Do not distribute until the release gate in docs/RELEASE.md passes.');
+}
+
+// A Defender detection or an incomplete scan of a signed release fails the
+// build; detections are never hidden or downgraded.
+if (defender.threatsFound > 0) {
+  console.error(`\nMicrosoft Defender reported ${defender.threatsFound} threat(s). Do NOT distribute. See reports/defender-scan.txt.`);
+  process.exit(3);
+}
+if (SIGNED && (!defender.available || defender.incomplete.length)) {
+  console.error('\nSigned release requires a completed Defender scan of every artifact on the release machine.');
+  process.exit(4);
+}
+
+function readmeFirst({ version, signed, setup, msi }) {
+  return `SOUNDWAVIAN FIELD ${version} - READ ME FIRST
+==========================================
+
+Soundwavian Field - Galactic Mandala Screensaver, by Soundwave Machine Learning.
+Runs fully offline. It makes no network connections and installs no
+background services, scheduled tasks or startup entries.
+
+1. IS THIS BUILD SIGNED?
+   ${signed ? 'Yes. Every program and installer here carries an Authenticode signature\n   from the publisher. Windows shows the publisher name when you install.' : 'NO. This is an unsigned development/test build. Windows will show\n   "Unknown publisher". Only install it if you received it directly from\n   the publisher for testing.'}
+
+2. WINDOWS SMARTSCREEN
+   Windows may show "Windows protected your PC" for new or unsigned
+   software, even when it is safe. To continue: click "More info", then
+   "Run anyway". Only do this if the SHA-256 check in step 3 matches.
+
+3. VERIFY THE DOWNLOAD (SHA-256)
+   In this folder, Shift + right-click > "Open in Terminal", then run:
+       Get-FileHash .\\${setup} -Algorithm SHA256
+   The long code must match the line for that file in SHA256SUMS.txt
+   exactly. If it does not match, do not run the file.
+
+4. WHICH INSTALLER?
+   Most people: ${setup}   (recommended)
+   IT departments / managed deployment: ${msi}
+   Use one or the other, not both. Both install to
+   C:\\Program Files\\Soundwavian Field\\ and need administrator approval once.
+   SoundwavianField.exe / SoundwavianField.scr are the program itself, for
+   inspection or portable use; you do not need them if you install.
+
+5. USE IT AS YOUR SCREENSAVER
+   a) Start "Soundwavian Field" from the Start menu.
+   b) Move the mouse; a small panel appears at the bottom left.
+   c) Click "Use as my screen saver", then "Screen Saver Settings..." to
+      choose how many minutes Windows waits before starting it.
+   (Alternative: right-click SoundwavianField.scr in
+   C:\\Program Files\\Soundwavian Field\\ and choose "Install".)
+
+6. SETTINGS
+   Windows Screen Saver Settings > select Soundwavian Field > "Settings...".
+   Or open the app and move the mouse to show the panel. Presets, sliders
+   and quality are saved for your Windows account.
+
+7. UNINSTALL
+   Settings > Apps > Installed apps > Soundwavian Field > Uninstall.
+
+8. MORE INFORMATION
+   BUILD_INFO.txt   exact version, commit and build details
+   SECURITY.md      what the program does and does not do on your PC
+   docs/RELEASE.md and docs/PHYSICAL_WINDOWS_GATE.md
+   (in the project's source repository) describe the release process.
+`;
 }

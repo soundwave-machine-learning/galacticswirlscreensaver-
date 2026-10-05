@@ -39,9 +39,9 @@ because they install under `C:\Program Files`) and do only this:
 | Install directory | `C:\Program Files\Soundwavian Field\` |
 | Files | `SoundwavianField.exe`, `SoundwavianField.scr`, `LICENSE-ASSETS.txt` (NSIS also adds `uninstall.exe`) |
 | Start Menu | `Soundwavian Field` shortcut → `SoundwavianField.exe` |
-| Desktop shortcut | Tauri's standard templates: NSIS offers it as a finish-page checkbox; for the MSI see the `Shortcut` table in `inspection.txt` |
+| Desktop shortcut | Tauri's standard templates: NSIS offers it as a finish-page checkbox; for the MSI see the `Shortcut` table in `reports/inspection.txt` |
 | Add/Remove Programs | Standard uninstall entry (publisher, version, icon) |
-| Registry | Only uninstall registration and shortcut bookkeeping. The exact keys of each build are listed in `dist/release/inspection.txt` and summarised in [SECURITY.md](../SECURITY.md) |
+| Registry | Only uninstall registration and shortcut bookkeeping. The exact keys of each build are listed in `dist/release/reports/inspection.txt` and summarised in [SECURITY.md](../SECURITY.md) |
 | Services, scheduled tasks, Run keys, Startup items | **None** |
 | WebView2 runtime | Not downloaded. Present on Windows 11 and on updated Windows 10. For machines without it (e.g. Windows 10 LTSC), build with `--webview-offline` to embed Microsoft's offline runtime installer |
 

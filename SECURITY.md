@@ -6,8 +6,8 @@ fails the build or CI when broken, or measured on a real Windows install by
 `scripts/windows/smoke-test.ps1`. The **Evidence** column says which.
 
 The CI runner re-checks this on every push (`.github/workflows/windows-release.yml`).
-Each build's own record is in `dist/release/inspection.txt` (MSI database
-tables, payload, signatures) and `dist/release/smoke-test-*.txt`
+Each build's own record is in `dist/release/reports/inspection.txt` (MSI database
+tables, payload, signatures) and `dist/release/reports/smoke-test-*.txt`
 (install/run/uninstall results).
 
 The latest verified run (commit `8a52419`, clean Windows Server 2025 VM) passed every
@@ -23,7 +23,7 @@ automated check for both installers. The details are in [docs/RELEASE.md](docs/R
 | Startup persistence (Run/RunOnce keys, Startup folders) | **None** | smoke test diff |
 | Runtime downloads | **None** | no updater, no HTTP client compiled in, WebView2 install mode `skip` (or an embedded offline installer); audit checks the config |
 | Administrator rights | Requested **once, by the installer**, because it installs to `C:\Program Files`. The app and screensaver always run as the user | MSI `ALLUSERS`/NSIS `perMachine`; no elevation manifest on the exe |
-| Scripts executed | **None** by the app. The installers run no PowerShell, CMD, VBScript or JScript | MSI `CustomAction` table, generated NSIS source in `dist/release/inspection/` |
+| Scripts executed | **None** by the app. The installers run no PowerShell, CMD, VBScript or JScript | MSI `CustomAction` table, generated NSIS source in `dist/release/reports/installer-sources/` |
 | Executable packers / compression | **None** (no UPX or similar). Installer payloads use the formats' standard cabinet/LZMA compression | release profile in `src-tauri/Cargo.toml` |
 
 ## 1. Every executable shipped
@@ -33,7 +33,7 @@ automated check for both installers. The details are in [docs/RELEASE.md](docs/R
 | `SoundwavianField.exe` | The application. Rust + Tauri 2. The web assets (HTML/JS/CSS, the three paintings) are embedded in it. |
 | `SoundwavianField.scr` | The same compiled binary under the screensaver extension. In `dist/release/` the `.exe` and `.scr` are byte-identical. The installers' copy of the `.exe` differs only by a small installer-type marker that Tauri's bundler stamps in, which is why the installed `.exe` and `.scr` hashes differ. |
 | `uninstall.exe` | NSIS installer only: the standard NSIS uninstaller (79 KB; signed in signed builds). |
-| Installers | `SoundwavianField-<ver>-x64.msi` (Windows Installer/WiX) and `SoundwavianField-<ver>-x64-setup.exe` (NSIS). |
+| Installers | `SoundwavianField-<ver>.msi` (Windows Installer/WiX) and `SoundwavianField-Setup-<ver>.exe` (NSIS). |
 
 No other executables are installed. The installer never extracts and runs a
 helper executable. The one optional exception is the `--webview-offline`
@@ -150,7 +150,7 @@ The MSI's complete `CustomAction` table, observed in CI:
 | `SetARPNOMODIFY`, `SetARPINSTALLLOCATION` | 51 | Set Add/Remove Programs properties |
 
 There are no script custom actions (types 5/6/21/22/37/38). The NSIS script
-(`dist/release/inspection/nsis-installer.nsi`) contains Tauri's WebView2
+(`dist/release/reports/installer-sources/nsis-installer.nsi`) contains Tauri's WebView2
 download/bootstrap code only inside `!if` blocks that are compiled **out**
 for this project's install mode (`skip`). Its only `ExecWait`s are for
 uninstalling a previous version. The PowerShell under `scripts/windows/` is

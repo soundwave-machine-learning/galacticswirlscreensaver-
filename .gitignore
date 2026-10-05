@@ -11,3 +11,8 @@ src-tauri/gen/
 *.cer
 .env
 .env.*
+*.pvk
+*.spc
+*.key
+*.pem
+codesign*
