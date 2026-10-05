@@ -18,7 +18,7 @@ own extension:
 
 | Invocation | Behaviour |
 | --- | --- |
-| `SoundwavianField.scr /s` | Full screen on every monitor (or primary only, per settings), always on top, cursor hidden. Any key, click, wheel, touch or real mouse movement exits at once. If the window loses focus (Alt+Tab, Win key, Ctrl+Alt+Del) the process exits too. |
+| `SoundwavianField.scr /s` | Full screen on every monitor (or primary only, per settings), always on top, cursor hidden. Any key, click, wheel, touch or real mouse movement exits at once. Two independent paths detect it: the page itself, and a native check of the session's last-input time and cursor position, so dismissal works even if the page stops responding. If another application takes the foreground (Alt+Tab, Win key, Ctrl+Alt+Del) it exits too. The windows are hidden the instant dismissal is detected, and a 2 s watchdog guarantees the process ends. |
 | `SoundwavianField.scr /p <HWND>` | Live preview inside the Screen Saver Settings dialog: a child window of `<HWND>` at low quality. The process checks the host window every 400 ms and exits as soon as the dialog closes. An invalid HWND exits immediately. |
 | `SoundwavianField.scr /c` or `/c:<HWND>` | Settings window, owned by the dialog when an HWND is given. |
 | `SoundwavianField.scr` (no arguments, e.g. double-click) | Settings window (Windows convention for `.scr`). |

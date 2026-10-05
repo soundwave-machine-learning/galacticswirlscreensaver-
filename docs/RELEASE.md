@@ -87,38 +87,52 @@ release is public, you can **manually** improve or check its reputation:
 
 ## Current status
 
-**Version 0.1.0, commit `8a52419`, DEVELOPMENT (unsigned) build. Not release-ready yet.**
-CI run [#37273845913](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37273845913)
-built on a fresh `windows-latest` VM (Windows Server 2025 Datacenter 10.0.26100, WebView2 153.0.4234.48):
+**Version 0.1.0, commit `c91016c`, DEVELOPMENT (unsigned) build.**
+**Distribution-ready except for (1) the user-supplied code-signing certificate and (2) the physical Windows 10/11 gate, which hasn't been performed yet.**
 
-| File | Size | SHA-256 |
-| --- | --- | --- |
-| `SoundwavianField-0.1.0-x64.msi` | 15.5 MB | `96034709d9f643898d43a4472cd9013c02d4774f5608a9d79119a748b8b7f2d4` |
-| `SoundwavianField-0.1.0-x64-setup.exe` | 14.2 MB | `6cb2d745c0fbdadacaff54826997693d4e95454bc7964cce4bb5d603b84a1370` |
-| `SoundwavianField.exe` / `.scr` | 10.1 MB | `2363b4767e7104890ff43cbdf20c042470a9ed77d0609f2b3d61b9efe10381b4` |
+Automated evidence: CI run [#37281442442](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37281442442),
+passed **3 of 3** attempts on the same commit. Each attempt was a fresh `windows-latest` VM: Windows Server 2025
+Datacenter 10.0.26100, WebView2 153.0.4234.48, a software display adapter, and the MSI and EXE installers each
+installed, run and uninstalled. Attempt 3 artifacts:
 
-(Unsigned CI builds aren't bit-for-bit reproducible across runs, so every run produces new hashes.)
+| File | SHA-256 |
+| --- | --- |
+| `SoundwavianField-0.1.0-x64.msi` | `56572bcc54ede60d84856d67c49ab4298e9954183e4c46eaef7855b442e81dc8` |
+| `SoundwavianField-0.1.0-x64-setup.exe` | `932d1a564648644d7b4a100d1e1f524d05673a1451bf30853c2069b6ff845e77` |
 
-| Gate | Status for this build |
+(Unsigned CI builds are rebuilt on every attempt, so hashes differ between attempts. Always test the hash listed in
+that build's own `SHA256SUMS.txt`.)
+
+| Gate | Status |
 | --- | --- |
 | Clean production build | ✅ |
-| No unexpected networking | ✅ audit passed; **0** non-loopback sockets from the app and its 6 WebView2 processes during `/s` (MSI and EXE installs) |
-| No hidden scripts | ✅ MSI `CustomAction` table holds only WiX UI helpers, the optional "Launch" checkbox and property setters; the NSIS script has no `Exec` outside the previous-version uninstall and the compiled-out WebView2 paths |
+| No unexpected networking | ✅ offline audit; **0** non-loopback sockets from the app and its 6 WebView2 processes during `/s` |
+| No hidden scripts | ✅ (unchanged; see SECURITY.md §9) |
 | No executable packer | ✅ |
 | Conventional installer | ✅ WiX MSI and NSIS |
-| Uninstall works | ✅ both installers: exit 0, files and Start Menu entries removed, nothing left behind |
-| Normal Windows metadata | ✅ Product/FileDescription "Soundwavian Field", OriginalFilename `SoundwavianField.exe`, version 0.1.0. (At that commit Company/copyright were still placeholders; fixed since, see below) |
-| Defender scan clean | ✅ "found no threats" for all four files (CI runner) |
-| Clean-machine / VM install tested | ⚠️ passed on a clean Windows **Server 2025** VM (CI). Still needed: Windows 10 and 11 desktop VMs, with a person at the keyboard |
-| `.scr` invocation behaviour | ✅ unit tests; `/a`, `/p 0`, `/p <invalid>` exit; `/s` renders (mean luma 76.8, 92% of pixels lit), keeps running on a first launch, and ends on real mouse movement. ⚠️ Still to check by hand: the live `/p` preview in the Screen Saver dialog, the `/c` window, and multi-monitor |
-| Application exits completely | ✅ no descendant process survives |
-| SHA-256 manifest | ✅ |
-| Signing configuration documented | ✅ |
-| Signed with the publisher's certificate | ❌ no certificate available yet |
-| Placeholders replaced | ❌ at that commit (fixed in the hardening pass below) |
-| Real-GPU 60 fps | ❌ not yet measured. CI renders through a software adapter, which says nothing about real-GPU fps |
+| Uninstall works | ✅ both installers; files, shortcuts and registration removed |
+| Normal Windows metadata | ✅ Product/FileDescription "Soundwavian Field", CompanyName **Soundwave Machine Learning**, copyright, version 0.1.0, OriginalFilename `SoundwavianField.exe`, Comments "Soundwavian Field — Galactic Mandala Screensaver". CI asserts no placeholder text |
+| Screensaver display name | ✅ string resource 1 = "Soundwavian Field" (what the Screen Saver dialog shows), asserted in CI |
+| Defender scan clean | ✅ "found no threats" for all four files |
+| `.scr` invocation behaviour (automated) | ✅ `/a`, `/p 0`, `/p <invalid>` exit; `/s` renders (mean luma ≈76, 92% of pixels lit) on a fresh WebView2 profile, keeps running, and ends on real mouse movement in 1.7–2.5 s (including 1.6 s of scripted movement). Helpers drain in 0.5 s |
+| Application exits completely | ✅ |
+| SHA-256 manifest, build metadata | ✅ (`build-info.json` records the publisher used) |
+| Signing configuration documented | ✅ [SIGNING.md](SIGNING.md); publisher overridable via `SFIELD_PUBLISHER` |
+| **Signed** with the publisher's certificate | ❌ **user-supplied certificate required** |
+| **Physical Windows 10/11 gate** | ❌ **not yet performed.** Follow [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md). Still unverified on real hardware: the live `/p` preview, the `/c` window inside the dialog, multi-monitor, mixed-DPI, real-GPU fps, reboot behaviour |
 
-**Verdict:** the packaging, offline behaviour and install/uninstall hygiene are
-verified. Don't hand this to another person until it's **signed**, the
-publisher placeholders are replaced, and the manual Windows 10/11 VM pass
-(preview, settings window, multi-monitor, real-GPU frame rate) is done.
+### Fixed in the hardening pass (verified in CI)
+
+1. Placeholder publisher identity replaced with **Soundwave Machine Learning**; it can be overridden at release time to
+   match the certificate subject.
+2. The `.scr` now carries its display name. Without string resource 1, the Screen Saver dialog would have shown the
+   file name "SoundwavianField".
+3. **Dismissal reliability.** One CI run caught a first-launch case where the screensaver was still running 8 s
+   after the mouse moved. Now the windows hide the instant dismissal is detected, a native last-input/cursor check
+   dismisses even if the page stops responding, and a 2 s watchdog guarantees the process ends.
+4. The smoke test's process-tree walk was confused by Windows PID reuse, reporting system processes as leftovers.
+   Fixed with a creation-time check.
+
+**Verdict:** don't call this publicly distribution-ready until it's built with `--signed` using your certificate and
+[PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) passes on Windows 11 (and Windows 10 if available) for that
+signed build.
