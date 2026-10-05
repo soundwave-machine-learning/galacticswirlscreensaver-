@@ -99,14 +99,23 @@ function Measure-Screen([string] $savePath) {
 }
 
 function Get-ProcessTree([int] $rootId) {
-  $all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine
+  # ParentProcessId is never cleared, and Windows reuses PIDs: a system
+  # process whose long-dead parent had the same PID as ours would look like
+  # our child. A real child is always created after its parent, so require that.
+  $all = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, CreationDate)
+  $byId = @{}
+  foreach ($p in $all) { $byId[[int]$p.ProcessId] = $p }
   $ids = [System.Collections.Generic.HashSet[int]]::new()
   [void] $ids.Add($rootId)
   do {
     $added = $false
     foreach ($p in $all) {
-      if ($ids.Contains([int]$p.ParentProcessId) -and -not $ids.Contains([int]$p.ProcessId)) {
-        [void] $ids.Add([int]$p.ProcessId); $added = $true
+      $parentId = [int]$p.ParentProcessId
+      if ($ids.Contains($parentId) -and -not $ids.Contains([int]$p.ProcessId)) {
+        $parent = $byId[$parentId]
+        if ($parent -and $p.CreationDate -ge $parent.CreationDate) {
+          [void] $ids.Add([int]$p.ProcessId); $added = $true
+        }
       }
     }
   } while ($added)
@@ -219,7 +228,8 @@ if (-not $proc.HasExited) {
 # Ending the main process must take every child with it (no lingering processes).
 if (-not $proc.HasExited) { Stop-Process -Id $proc.Id }
 Start-Sleep -Seconds 6
-$left = @(Get-CimInstance Win32_Process | Where-Object { $tree.ProcessId -contains $_.ProcessId })
+$treeKeys = @($tree | ForEach-Object { "$($_.ProcessId)@$($_.CreationDate.Ticks)" })
+$left = @(Get-CimInstance Win32_Process | Where-Object { $treeKeys -contains "$($_.ProcessId)@$($_.CreationDate.Ticks)" })
 Check ($left.Count -eq 0) "no processes remain after the screen saver ends $(if ($left.Count) { '-> ' + ($left.Name -join ', ') })"
 
 Log "`n[6] Uninstall"
