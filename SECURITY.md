@@ -28,12 +28,13 @@ automated check for both installers. The details are in [docs/RELEASE.md](docs/R
 
 ## Final release re-audit: observed facts
 
-Observed on fresh `windows-latest` VMs (Windows Server 2025 Datacenter 10.0.26100, WebView2 153.0.4234.48), from
-CI run [37281442442](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37281442442)
-on commit `c91016c`, 3 of 3 attempts. Both installers were installed, run and uninstalled each time. The Rust host
-(`src-tauri/`) is byte-identical at the current release candidate. For the newer test coverage added since (the
-`/p` host window, `/c`, keyboard dismissal, offline run, import tables), see the *Current status* in
-[docs/RELEASE.md](docs/RELEASE.md#current-status).
+Observed on fresh `windows-latest` VMs (Windows Server 2025 Datacenter 10.0.26100, WebView2 153.0.4234.48, software
+display adapter), from CI run
+[37380223059](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37380223059) on
+commit `358f322`, the last commit that changed application or build code (later commits change documentation only).
+Both installers (MSI and setup.exe) were installed, exercised in `/a`, `/p`, `/c`, app, `/s` (mouse, keyboard,
+outbound-blocked) modes, and uninstalled. Earlier runs on `c91016c` and `64f3bec` showed the same results for every row
+below. The release gate with per-check evidence is in [docs/RELEASE.md](docs/RELEASE.md#current-status).
 
 The two columns describe different things. **Soundwavian Field** is what this application's own code does or ships.
 **WebView2 / Windows** is normal behaviour of Microsoft's runtime or the OS that any WebView2 application shares.
@@ -56,10 +57,13 @@ The two columns describe different things. **Soundwavian Field** is what this ap
 | Temporary executable execution | **None** by the app | The NSIS *uninstaller* copies itself to `%TEMP%` to delete the install folder (standard NSIS behaviour) |
 | PowerShell | **Never** launched (observed child-process list) | — |
 | CMD | **Never** launched (observed child-process list) | — |
-| Packers / compressors | No executable packer (no UPX or similar step in the pipeline). Installer payloads use the formats' standard MSI cabinet / NSIS LZMA compression | — |
+| Packers / compressors | No executable packer (no UPX or similar step in the pipeline). Observed PE sections: `.text .rdata .data .pdata .rsrc .reloc` only. Installer payloads use the formats' standard MSI cabinet / NSIS LZMA compression | — |
+| Imported DLLs | Observed (dumpbin): 23 Windows system DLLs only, e.g. `kernel32`, `user32`, `gdi32`, `dwmapi`, `advapi32`, `ole32`, `shell32`, `api-ms-win-crt-*`. No networking DLL (`ws2_32`, `winhttp`, `wininet`) is imported | — |
+| Offline operation | Observed: with outbound traffic blocked by Windows Firewall for the app **and** every `msedgewebview2.exe`, `/s` rendered, opened 0 sockets and exited on input | — |
+| Process exit | Observed: on input the windows are DWM-cloaked within 0.07–0.53 s and the process is gone within 0.36–1.09 s; a 1 s watchdog ends the process with `TerminateProcess` if a normal exit stalls | Helpers drain within 0.5–6.3 s (observed) |
 | Updater | **None** | — |
 | Analytics / telemetry | **None.** The offline audit fails on telemetry APIs. *Copy Diagnostics* writes only to the local clipboard on a user keypress | Windows diagnostic-data settings apply to the OS, not to this app |
-| Defender | Observed: "found no threats" for the setup.exe, MSI, `.scr` and `.exe` (3 of 3 attempts) | — |
+| Defender | Observed: MpCmdRun custom scan, "no threats found in 4 files" (setup.exe, MSI, `.scr`, `.exe`), threat count 0. One engine's result on CI signatures, not a guarantee about other engines | Defender is part of Windows |
 
 **Precise network statement:** the Soundwavian Field application logic performs no runtime network requests and
 needs no network functionality during normal screensaver operation. It doesn't claim to control what the

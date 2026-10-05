@@ -51,11 +51,11 @@ build (same SHA-256s).
 | No hidden scripts | MSI `CustomAction` table + generated NSIS source reviewed (`dist/release/reports/installer-sources/`) | ✅ table dump in CI; review is manual |
 | No executable packer | release profile; PE inspection | ✅ by construction |
 | Conventional installer | Tauri's standard WiX MSI + NSIS | ✅ |
-| Uninstall works | smoke test step 6 | ✅ CI (MSI + NSIS) |
+| Uninstall works | smoke test step 11 | ✅ CI (MSI + NSIS) |
 | Normal Windows metadata | smoke test prints ProductName, CompanyName, FileDescription, OriginalFilename, version, copyright | ✅ CI (check the values) |
 | Defender scan clean | `reports/defender-scan.txt` (MpCmdRun custom scan of every artifact) | ✅ CI; repeat for the signed build on the release machine |
 | Clean-machine / VM install tested | [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) on Windows 11 and 10, plus the smoke test on a fresh VM | ❌ manual |
-| `.scr` invocation behaviour tested | unit tests + smoke test (`/a`, `/p` with an invalid HWND, `/s`) + **manual** checks of `/c`, the live preview in the Screen Saver dialog, and dismiss-on-input | ⚠️ partly manual |
+| `.scr` invocation behaviour tested | unit tests + smoke test (`/a`, `/p` invalid and in a host window, `/c`, `/s` with mouse, keyboard and blocked network) + **manual** checks of the live preview and the *Settings…* button in the real Screen Saver dialog | ⚠️ partly manual |
 | Application exits completely | smoke test: no descendant process survives the main process | ✅ CI; also check after dismissing with the mouse |
 | SHA-256 manifest generated | `SHA256SUMS.txt` | ✅ |
 | Signing configuration documented | [SIGNING.md](SIGNING.md) | ✅ |
@@ -87,39 +87,72 @@ release is public, you can **manually** improve or check its reputation:
 
 ## Current status
 
-**Version 0.1.0, commit `c91016c`, DEVELOPMENT (unsigned) build.**
-**Distribution-ready except for (1) the user-supplied code-signing certificate and (2) the physical Windows 10/11 gate, which hasn't been performed yet.**
+**Version 0.1.0. Classification: READY FOR SIGNING.** The application is complete, the automated Windows release
+tests pass, the security re-audit passes and the signing pipeline is prepared. No production code-signing certificate
+has been supplied, so nothing is signed yet. The physical Windows 10/11 validation hasn't been performed.
 
-Automated evidence: CI run [#37281442442](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37281442442),
-passed **3 of 3** attempts on the same commit. Each attempt was a fresh `windows-latest` VM: Windows Server 2025
-Datacenter 10.0.26100, WebView2 153.0.4234.48, a software display adapter, and the MSI and EXE installers each
-installed, run and uninstalled. Attempt 3 artifacts:
+Evidence comes from CI run
+[37380223059](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37380223059)
+on commit `358f322d2343e1b333c79aad8319663324ed0b87`. Later commits change documentation only, and every push
+re-runs the same workflow. Each attempt was a fresh `windows-latest` VM: Windows Server 2025 Datacenter
+10.0.26100, WebView2 153.0.4234.48, software display adapter. These are **unsigned DEVELOPMENT** builds, and each
+attempt rebuilds the artifacts, so hashes differ between runs. Always compare against that build's own
+`SHA256SUMS.txt`.
 
-| File | SHA-256 |
-| --- | --- |
-| `SoundwavianField-0.1.0-x64.msi` | `56572bcc54ede60d84856d67c49ab4298e9954183e4c46eaef7855b442e81dc8` |
-| `SoundwavianField-0.1.0-x64-setup.exe` | `932d1a564648644d7b4a100d1e1f524d05673a1451bf30853c2069b6ff845e77` |
+Statuses: **PASS** observed and correct · **FAIL** observed and wrong · **BLOCKED** can't be done until a
+prerequisite exists · **NOT RUN** not performed yet. CI results never count as physical results.
 
-(Unsigned CI builds are rebuilt on every attempt, so hashes differ between attempts. Always test the hash listed in
-that build's own `SHA256SUMS.txt`.)
+| Check | Status | Evidence |
+| --- | --- | --- |
+| Source tree clean | PASS | `git status` clean locally before commit; the CI build printed no uncommitted-changes warning, and `build-info.json` records `dirty: false` |
+| Remote synchronization | PASS | local `HEAD` = `origin/claude/beautiful-goodall-ensaql` after push (`git ls-remote`) |
+| Frontend production build | PASS | `npm run build`: type-check, Vite and the offline audit, in CI (web job and Windows job) |
+| Rust compile | PASS | `cargo build --release` (x86_64-pc-windows-msvc, rustc 1.99.0); native unit tests pass |
+| Clippy | PASS | `cargo clippy --release -- -D warnings`: no warnings |
+| MSI creation | PASS | `SoundwavianField-0.1.0.msi` (WiX) produced |
+| Setup EXE creation | PASS | `SoundwavianField-Setup-0.1.0.exe` (NSIS) produced |
+| SCR creation | PASS | `SoundwavianField.scr` staged and installed by both installers |
+| Product identity | PASS | ProductName/FileDescription "Soundwavian Field", Comments "Soundwavian Field — Galactic Mandala Screensaver…", OriginalFilename `SoundwavianField.exe`, version 0.1.0, asserted for the installed `.exe` and `.scr` |
+| Publisher identity | PASS | CompanyName and copyright "Soundwave Machine Learning"; no placeholder text (asserted). Must still match the certificate subject when signing |
+| Screensaver display name | PASS | string resource 1 = "Soundwavian Field" (asserted) |
+| /s | PASS | renders full screen (mean luma ≈76), keeps running; only `SoundwavianField` + `msedgewebview2.exe` processes |
+| /c | PASS | opens "Soundwavian Field - Screen Saver Settings", closes cleanly in 0.2 s, no leftovers. Inside the real dialog: see *Screen Saver Settings button* |
+| /p | PASS | in a stand-in host window: child window created, field drawn (luma ≈70), exits 0.1 s after the host closes; `/p 0` and `/p 999999` exit. Inside the real dialog: see *Screen Saver dialog preview* |
+| /a | PASS | exits on its own |
+| Mouse dismissal | PASS | windows hidden 0.09–0.53 s after real mouse input, process gone in 0.57–1.09 s |
+| Keyboard dismissal | PASS | injected key registered by Windows (last-input tick changed); hidden 0.19–0.52 s, gone in 0.47–1.03 s |
+| First-launch behavior | PASS | `/s` and the app on a deleted (cold) WebView2 profile render and keep running until input |
+| Process termination | PASS | no process of the tree remains (PID-reuse-safe check) and no window remains after every mode |
+| MSI install | PASS | silent `msiexec` install, exit code 0; `.exe` and `.scr` present in `C:\Program Files\Soundwavian Field\` |
+| MSI uninstall | PASS | exit code 0; files, Start Menu and desktop shortcuts removed; no process left |
+| EXE install | PASS | silent NSIS install, exit code 0; `.exe` and `.scr` present in `C:\Program Files\Soundwavian Field\` |
+| EXE uninstall | PASS | exit code 0; files, Start Menu and desktop shortcuts removed; no process left |
+| No app networking | PASS | offline audit; **0** sockets from the app and its WebView2 processes during `/s` and the app; `/s` works with outbound traffic firewalled for the app and every `msedgewebview2.exe`; no networking DLL imported |
+| No services | PASS | service diff before/after install and after uninstall; MSI `ServiceInstall` table absent |
+| No scheduled tasks | PASS | task diff before/after install and after uninstall |
+| No startup persistence | PASS | Run/RunOnce keys and Startup folders unchanged |
+| No runtime downloads | PASS | no updater, no HTTP client compiled in, WebView2 install mode `skip` (audited) |
+| No packer | PASS | PE sections `.text .rdata .data .pdata .rsrc .reloc` only; 23 system DLL imports |
+| Defender | PASS | MpCmdRun custom scan of the 4 artifacts: "no threats found", threat count 0 (`reports/defender-scan.txt`). Not yet repeated on the signed build |
+| SHA-256 manifest | PASS | `SHA256SUMS.txt`, generated as the last step after any signing |
+| Build-info manifest | PASS | `BUILD_INFO.txt` + `reports/build-info.json` (commit, timestamp, CI run, toolchain, signed flag, Defender result; no secrets) |
+| Signing pipeline readiness | PASS | audited sequence in [SIGNING.md](SIGNING.md); in CI, `release.mjs --signed` and `sign.mjs` both refuse (exit 1) with no certificate. The positive signed path hasn't been run, because no certificate exists |
+| Actual Authenticode signing | BLOCKED | no production code-signing certificate supplied; all artifacts are `NotSigned` |
+| Signature verification | BLOCKED | depends on actual signing |
+| Windows 10 physical test | NOT RUN | [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) |
+| Windows 11 physical test | NOT RUN | [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) |
+| Screen Saver dialog preview | NOT RUN | physical gate §3 |
+| Screen Saver Settings button | NOT RUN | physical gate §4 |
+| Reboot persistence behavior | NOT RUN | physical gate §9 |
+| Single-monitor real GPU test | NOT RUN | physical gate §5 (CI has only a software adapter) |
+| Multi-monitor test | NOT RUN | physical gate §5 |
+| Mixed-DPI test | NOT RUN | physical gate §5 |
+| Real hardware FPS | NOT RUN | physical gate §6 (**D** overlay average per preset) |
+| Real hardware minimum FPS | NOT RUN | physical gate §6 (**D** overlay minimum per preset) |
 
-| Gate | Status |
-| --- | --- |
-| Clean production build | ✅ |
-| No unexpected networking | ✅ offline audit; **0** non-loopback sockets from the app and its 6 WebView2 processes during `/s` |
-| No hidden scripts | ✅ (unchanged; see SECURITY.md §9) |
-| No executable packer | ✅ |
-| Conventional installer | ✅ WiX MSI and NSIS |
-| Uninstall works | ✅ both installers; files, shortcuts and registration removed |
-| Normal Windows metadata | ✅ Product/FileDescription "Soundwavian Field", CompanyName **Soundwave Machine Learning**, copyright, version 0.1.0, OriginalFilename `SoundwavianField.exe`, Comments "Soundwavian Field — Galactic Mandala Screensaver". CI asserts no placeholder text |
-| Screensaver display name | ✅ string resource 1 = "Soundwavian Field" (what the Screen Saver dialog shows), asserted in CI |
-| Defender scan clean | ✅ "found no threats" for all four files |
-| `.scr` invocation behaviour (automated) | ✅ `/a`, `/p 0`, `/p <invalid>` exit; `/s` renders (mean luma ≈76, 92% of pixels lit) on a fresh WebView2 profile, keeps running, and ends on real mouse movement in 1.7–2.5 s (including 1.6 s of scripted movement). Helpers drain in 0.5 s |
-| Application exits completely | ✅ |
-| SHA-256 manifest, build metadata | ✅ (`build-info.json` records the publisher used) |
-| Signing configuration documented | ✅ [SIGNING.md](SIGNING.md); publisher overridable via `SFIELD_PUBLISHER` |
-| **Signed** with the publisher's certificate | ❌ **user-supplied certificate required** |
-| **Physical Windows 10/11 gate** | ❌ **not yet performed.** Follow [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md). Still unverified on real hardware: the live `/p` preview, the `/c` window inside the dialog, multi-monitor, mixed-DPI, real-GPU fps, reboot behaviour |
+**Remaining blockers:** (1) a production code-signing certificate, then a `signed: true` build that verifies;
+(2) the physical gate on Windows 11 (and Windows 10 if available) for that signed build. Only after both may a
+build be classified as *DISTRIBUTION READY*.
 
 ### Fixed in the hardening pass (verified in CI)
 
@@ -128,10 +161,17 @@ that build's own `SHA256SUMS.txt`.)
 2. The `.scr` now carries its display name. Without string resource 1, the Screen Saver dialog would have shown the
    file name "SoundwavianField".
 3. **Dismissal reliability.** One CI run caught a first-launch case where the screensaver was still running 8 s
-   after the mouse moved. Now the windows hide the instant dismissal is detected, a native last-input/cursor check
-   dismisses even if the page stops responding, and a watchdog guarantees the process ends (now 1 s, armed first; see the hardening log below).
-4. The smoke test's process-tree walk was confused by Windows PID reuse, reporting system processes as leftovers.
+   after the mouse moved. A native last-input/cursor check now dismisses even if the page stops responding.
+4. **Slow keyboard dismissal.** The new keyboard test measured 3.6–12.8 s from keypress to exit, even though Windows
+   had registered the key and the screensaver owned the foreground. Shutdown now runs once and arms a 1 s watchdog
+   first. It cloaks the windows through DWM (`DWMWA_CLOAK`) and hides them without waiting on the UI thread. If a
+   normal exit stalls, the watchdog ends the process with `TerminateProcess`. Measured afterwards: windows hidden in
+   0.07–0.53 s, process gone in 0.36–1.09 s.
+5. The smoke test's process-tree walk was confused by Windows PID reuse, reporting system processes as leftovers.
    Fixed with a creation-time check.
+6. Release layout: `SoundwavianField-Setup-<ver>.exe`, `SoundwavianField-<ver>.msi`, `.scr`, `.exe`,
+   `SHA256SUMS.txt`, `BUILD_INFO.txt`, `README-FIRST.txt`, with reports in `reports/`. Diagnostics (**D** / **C**,
+   local clipboard only) added.
 
 **Verdict:** don't call this publicly distribution-ready until it's built with `--signed` using your certificate and
 [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) passes on Windows 11 (and Windows 10 if available) for that
