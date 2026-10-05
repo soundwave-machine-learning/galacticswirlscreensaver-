@@ -15,9 +15,14 @@ uniform vec2 uCenter;
 uniform float uRotation;
 uniform float uPixelsPerUnit;
 
-uniform sampler2D uTex;
-uniform vec2 uTexCenter;
+uniform sampler2D uTexA;
+uniform sampler2D uTexB;
+uniform vec2 uTexCenterA;
+uniform vec2 uTexCenterB;
+uniform float uMix;
+uniform float uEmergence;
 uniform float uCover;
+uniform float uEmergeBoost;   // how strongly this layer heralds the incoming field
 
 // Population shape
 uniform vec2 uDepthRange;   // min/max depth (1 = focal plane, larger = farther)
@@ -76,12 +81,18 @@ void main() {
   vec2 screen = rot(cam, uCamera.w);
   gl_Position = vec4(screen / uAspect, 0.0, 1.0);
 
-  // Colour drawn from the painting underneath.
-  vec2 tuv = uTexCenter + (world - uCenter) / uCover;
-  vec3 tex = textureLod(uTex, tuv, 4.0).rgb;
+  // Colour drawn from the painting underneath. The incoming painting tints
+  // particles (and lifts those over its bright structures) before it shows.
+  vec2 rel = rot(world - uCenter, -uRotation);
+  vec3 texA = textureLod(uTexA, uTexCenterA + rel / uCover, 4.0).rgb;
+  vec3 texB = textureLod(uTexB, uTexCenterB + rel / uCover, 4.0).rgb;
+  float early = clamp(uMix + uEmergence * uEmergeBoost * 0.7, 0.0, 1.0);
+  vec3 tex = mix(texA, texB, early);
   vec3 base = vec3(0.86, 0.9, 1.0);
   vec3 tint = tex * 1.6 / max(max(tex.r, max(tex.g, tex.b)), 0.25);
   vColor = mix(base, tint, uTintAmount);
+  float lumB = dot(texB, vec3(0.2126, 0.7152, 0.0722));
+  float herald = 1.0 + uEmergence * uEmergeBoost * smoothstep(0.12, 0.55, lumB) * 2.2 * (1.0 - uMix);
 
   float sizeWorld = mix(uSizeRange.x, uSizeRange.y, aParams.x * aParams.x);
   float px = sizeWorld * uPixelsPerUnit * par * uCamera.z;
@@ -93,7 +104,7 @@ void main() {
   // Keep energy constant when the sprite is clamped up to the minimum size.
   float sub = (px * px) / (pxClamped * pxClamped);
 
-  vAlpha = fade * tw * cull * uBrightness * min(1.0, sub + 0.15);
+  vAlpha = fade * tw * cull * herald * uBrightness * min(1.0, sub + 0.15);
   gl_PointSize = pxClamped;
   if (vAlpha <= 0.002) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);

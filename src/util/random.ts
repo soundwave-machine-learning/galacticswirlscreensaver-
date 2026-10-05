@@ -40,3 +40,30 @@ export const smootherstep = (t: number) => {
 /** Frame-rate independent exponential approach. */
 export const approach = (current: number, target: number, dt: number, tau: number) =>
   target + (current - target) * Math.exp(-dt / Math.max(tau, 1e-4));
+
+/**
+ * Smooth 1D value noise in [0, 1] - used for slow envelopes ("occasionally
+ * becomes clearer, then disappears again"). Knots every `period` seconds.
+ */
+export class SlowEnvelope {
+  private knots: number[];
+
+  constructor(
+    seed: number,
+    private readonly period: number,
+    count = 64,
+  ) {
+    const rand = mulberry32(seed);
+    this.knots = Array.from({ length: count }, () => rand());
+  }
+
+  value(t: number): number {
+    const x = t / this.period;
+    const i = Math.floor(x);
+    const f = x - i;
+    const n = this.knots.length;
+    const a = this.knots[((i % n) + n) % n];
+    const b = this.knots[(((i + 1) % n) + n) % n];
+    return lerp(a, b, smootherstep(f));
+  }
+}
