@@ -53,7 +53,7 @@ build (same SHA-256s).
 | Conventional installer | Tauri's standard WiX MSI + NSIS | ✅ |
 | Uninstall works | smoke test step 6 | ✅ CI (MSI + NSIS) |
 | Normal Windows metadata | smoke test prints ProductName, CompanyName, FileDescription, OriginalFilename, version, copyright | ✅ CI (check the values) |
-| Defender scan clean | `defender-scan.txt` | ⚠️ the CI image usually has Defender disabled, so scan on the release machine |
+| Defender scan clean | `defender-scan.txt` (MpCmdRun custom scan of every artifact) | ✅ CI; repeat for the signed build on the release machine |
 | Clean-machine / VM install tested | smoke test on a fresh Windows 10 **and** 11 VM, plus a manual look | ❌ manual |
 | `.scr` invocation behaviour tested | unit tests + smoke test (`/a`, `/p` with an invalid HWND, `/s`) + **manual** checks of `/c`, the live preview in the Screen Saver dialog, and dismiss-on-input | ⚠️ partly manual |
 | Application exits completely | smoke test: no descendant process survives the main process | ✅ CI; also check after dismissing with the mouse |
@@ -92,4 +92,38 @@ release is public, you can **manually** improve or check its reputation:
 
 ## Current status
 
-See the bottom of this file, which is updated as CI runs.
+**Version 0.1.0, commit `8a52419`, DEVELOPMENT (unsigned) build. Not release-ready yet.**
+CI run [#37273845913](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37273845913)
+built on a fresh `windows-latest` VM (Windows Server 2025 Datacenter 10.0.26100, WebView2 153.0.4234.48):
+
+| File | Size | SHA-256 |
+| --- | --- | --- |
+| `SoundwavianField-0.1.0-x64.msi` | 15.5 MB | `96034709d9f643898d43a4472cd9013c02d4774f5608a9d79119a748b8b7f2d4` |
+| `SoundwavianField-0.1.0-x64-setup.exe` | 14.2 MB | `6cb2d745c0fbdadacaff54826997693d4e95454bc7964cce4bb5d603b84a1370` |
+| `SoundwavianField.exe` / `.scr` | 10.1 MB | `2363b4767e7104890ff43cbdf20c042470a9ed77d0609f2b3d61b9efe10381b4` |
+
+(Unsigned CI builds aren't bit-for-bit reproducible across runs, so every run produces new hashes.)
+
+| Gate | Status for this build |
+| --- | --- |
+| Clean production build | ✅ |
+| No unexpected networking | ✅ audit passed; **0** non-loopback sockets from the app and its 6 WebView2 processes during `/s` (MSI and EXE installs) |
+| No hidden scripts | ✅ MSI `CustomAction` table holds only WiX UI helpers, the optional "Launch" checkbox and property setters; the NSIS script has no `Exec` outside the previous-version uninstall and the compiled-out WebView2 paths |
+| No executable packer | ✅ |
+| Conventional installer | ✅ WiX MSI and NSIS |
+| Uninstall works | ✅ both installers: exit 0, files and Start Menu entries removed, nothing left behind |
+| Normal Windows metadata | ✅ Product/FileDescription "Soundwavian Field", OriginalFilename `SoundwavianField.exe`, version 0.1.0. ⚠️ Company/copyright are still **placeholders** |
+| Defender scan clean | ✅ "found no threats" for all four files (CI runner) |
+| Clean-machine / VM install tested | ⚠️ passed on a clean Windows **Server 2025** VM (CI). Still needed: Windows 10 and 11 desktop VMs, with a person at the keyboard |
+| `.scr` invocation behaviour | ✅ unit tests; `/a`, `/p 0`, `/p <invalid>` exit; `/s` renders (mean luma 76.8, 92% of pixels lit), keeps running on a first launch, and ends on real mouse movement. ⚠️ Still to check by hand: the live `/p` preview in the Screen Saver dialog, the `/c` window, and multi-monitor |
+| Application exits completely | ✅ no descendant process survives |
+| SHA-256 manifest | ✅ |
+| Signing configuration documented | ✅ |
+| Signed with the publisher's certificate | ❌ no certificate available yet |
+| Placeholders replaced | ❌ publisher name needed |
+| Real-GPU 60 fps | ❌ not yet measured. CI renders through a software adapter, which says nothing about real-GPU fps |
+
+**Verdict:** the packaging, offline behaviour and install/uninstall hygiene are
+verified. Don't hand this to another person until it's **signed**, the
+publisher placeholders are replaced, and the manual Windows 10/11 VM pass
+(preview, settings window, multi-monitor, real-GPU frame rate) is done.

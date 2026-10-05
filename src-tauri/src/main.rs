@@ -1,8 +1,8 @@
 //! Soundwavian Field - Windows host.
 //!
 //! One conventional executable, shipped twice by the installer under stable
-//! names: `SoundwavianField.exe` (the app) and a byte-identical
-//! `SoundwavianField.scr` (the screen saver entry point). It renders a
+//! names: `SoundwavianField.exe` (the app) and `SoundwavianField.scr` (the
+//! screen saver entry point), built from the same compiled binary. It renders a
 //! locally bundled WebGL page in the system WebView2 runtime.
 //!
 //! Process model: this process plus the WebView2 runtime's own helper

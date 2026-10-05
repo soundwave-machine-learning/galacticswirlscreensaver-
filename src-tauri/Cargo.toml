@@ -10,7 +10,7 @@ publish = false
 
 [[bin]]
 # Stable, space-free binary name. The installer ships this exact file as
-# SoundwavianField.exe (app) and a byte-identical SoundwavianField.scr.
+# SoundwavianField.exe (app) and as SoundwavianField.scr (screen saver).
 name = "SoundwavianField"
 path = "src/main.rs"
 

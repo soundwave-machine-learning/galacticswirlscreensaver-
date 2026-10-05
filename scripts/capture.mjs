@@ -7,7 +7,7 @@
 //
 // Needs Playwright (`npm i -D playwright` or a global install) and, for the
 // clip, ffmpeg on PATH. Output: docs/screenshots/ and docs/preview.mp4.
-// Software-rendered frames (SwiftShader) are slow but identical to GPU output.
+// Frames are software-rendered (SwiftShader): slow, but visually the same output.
 
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';

@@ -10,7 +10,8 @@ Each build's own record is in `dist/release/inspection.txt` (MSI database
 tables, payload, signatures) and `dist/release/smoke-test-*.txt`
 (install/run/uninstall results).
 
-Status of the latest CI run is recorded in [docs/RELEASE.md](docs/RELEASE.md#current-status).
+The latest verified run (commit `8a52419`, clean Windows Server 2025 VM) passed every
+automated check for both installers. The details are in [docs/RELEASE.md](docs/RELEASE.md#current-status).
 
 ## Summary
 
@@ -30,8 +31,8 @@ Status of the latest CI run is recorded in [docs/RELEASE.md](docs/RELEASE.md#cur
 | File | What it is |
 | --- | --- |
 | `SoundwavianField.exe` | The application. Rust + Tauri 2. The web assets (HTML/JS/CSS, the three paintings) are embedded in it. |
-| `SoundwavianField.scr` | The same executable under the screensaver extension. Byte-identical in development builds; in signed builds it's the same compiled output, signed. |
-| `uninstall.exe` | NSIS installer only: the standard NSIS uninstaller (signed in signed builds). |
+| `SoundwavianField.scr` | The same compiled binary under the screensaver extension. In `dist/release/` the `.exe` and `.scr` are byte-identical. The installers' copy of the `.exe` differs only by a small installer-type marker that Tauri's bundler stamps in, which is why the installed `.exe` and `.scr` hashes differ. |
+| `uninstall.exe` | NSIS installer only: the standard NSIS uninstaller (79 KB; signed in signed builds). |
 | Installers | `SoundwavianField-<ver>-x64.msi` (Windows Installer/WiX) and `SoundwavianField-<ver>-x64-setup.exe` (NSIS). |
 
 No other executables are installed. The installer never extracts and runs a
@@ -41,10 +42,12 @@ and runs it only if WebView2 is missing.
 
 ## 2. DLLs and native modules
 
-**We ship no DLLs.** The executable links only to Windows system libraries
-(kernel32, user32, ole32, advapi32, gdi32, shell32, etc. — `inspection.txt`
-lists the exact import table when `dumpbin` is available on the build machine)
-and loads `WebView2Loader` logic statically. Rendering happens in the
+**We ship no DLLs.** CI confirms that the installed folder holds exactly
+`SoundwavianField.exe`, `SoundwavianField.scr`, `LICENSE-ASSETS.txt` and a
+shortcut (plus `uninstall.exe` for the NSIS installer). The executable links
+only to Windows system libraries, and the WebView2 loader is linked
+statically, so there's no `WebView2Loader.dll`. `inspection.txt` lists the
+exact import table when `dumpbin` is available on the build machine. Rendering happens in the
 Microsoft Edge **WebView2 Runtime**, a Microsoft-signed, Microsoft-serviced
 OS component that isn't part of our package.
 
@@ -52,7 +55,7 @@ OS component that isn't part of our package.
 
 | Process | When | Visible? |
 | --- | --- | --- |
-| `msedgewebview2.exe` (several: browser, renderer, GPU, utility) | Started by the WebView2 runtime for our window | Normal processes, exit with the window |
+| `msedgewebview2.exe` (6 observed in CI: browser, renderer, GPU, utility…) | Started by the WebView2 runtime for our window | Normal processes, exit with the window |
 | `control.exe desk.cpl,,@screensaver` | Only when you click **Screen Saver Settings…** | Opens the standard visible Control Panel dialog |
 
 There are no hidden windows, CMD/PowerShell launches, or background
@@ -62,23 +65,30 @@ descendant process is gone.
 
 ## 4. Registry keys written
 
-| Key | Written by | When |
+Observed from the built installers (MSI database tables and the generated
+NSIS script, both dumped by CI):
+
+| Key / value | Written by | Notes |
 | --- | --- | --- |
-| `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\…` | Installer | Install. This is the standard Add/Remove Programs entry |
-| Windows Installer's own bookkeeping (MSI), `HKLM\Software\Soundwavian Field Publisher (placeholder)\Soundwavian Field` (NSIS install path) | Installer | Install; removed on uninstall |
-| `HKCU\Control Panel\Desktop\SCRNSAVE.EXE` | **The app, only when you click "Use as my screen saver"** | This is the same per-user value the Windows Screen Saver dialog writes. The NSIS uninstaller clears it if it points at our `.scr` |
+| Windows Installer's own product registration (`…\Installer\…`, Add/Remove Programs) | MSI engine | Standard for every MSI. The package's own `Registry` table is **empty** |
+| `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\<product key>`: `DisplayName`, `DisplayIcon`, `DisplayVersion`, `Publisher`, `InstallLocation`, `UninstallString`, `NoModify`, `NoRepair`, `EstimatedSize` | NSIS installer | Add/Remove Programs entry; deleted on uninstall |
+| `HKLM\Software\<Publisher>\<Product>` (default value = install folder; exact key names in the generated NSIS script) | NSIS installer | Deleted on uninstall |
+| `HKCU\Control Panel\Desktop\SCRNSAVE.EXE` | **The app, only when you click "Use as my screen saver"** | The same per-user value the Windows Screen Saver dialog writes. The NSIS uninstaller clears it if it points at our `.scr` |
 | `HKCU\Control Panel\Desktop\ScreenSaveActive` | Windows itself, via `SystemParametersInfo(SPI_SETSCREENSAVEACTIVE)` | Same click |
 
-Nothing else is written. That means no Run keys, file associations, URL
-protocols, shell extensions, COM registration, firewall rules or policy keys.
-The full MSI `Registry` table for each build is in `inspection.txt`.
+Nothing else is written: no Run keys, file associations, URL protocols, shell
+extensions, COM registration, firewall rules or policy keys. (Tauri's NSIS
+uninstaller also *deletes* an `HKCU\…\Run\Soundwavian Field` value if one
+exists, as part of its generic cleanup. We never create one.)
 
 ## 5. File-system locations written
 
 | Location | By | Content |
 | --- | --- | --- |
 | `C:\Program Files\Soundwavian Field\` | Installer | The files in §1 plus `LICENSE-ASSETS.txt` |
-| Start Menu (`%ProgramData%\Microsoft\Windows\Start Menu\Programs\`) | Installer | `Soundwavian Field` shortcut (plus an optional desktop shortcut) |
+| Start Menu (`%ProgramData%\Microsoft\Windows\Start Menu\Programs\`) | Installer | `Soundwavian Field` shortcut |
+| Desktop | Installer | `Soundwavian Field` shortcut (MSI always; NSIS when the finish-page box is ticked) |
+| Install folder | MSI | an `Uninstall Soundwavian Field` shortcut (runs `msiexec /x {ProductCode}`) |
 | `%APPDATA%\com.soundwavian.field\settings.json` | App | Your settings (validated JSON, ≤64 KB, written atomically via a `.tmp` file in the same folder) |
 | `%LOCALAPPDATA%\com.soundwavian.field\EBWebView\` | WebView2 runtime | Browser profile folder. The app runs WebView2 InPrivate, so no cache or storage is persisted beyond the runtime's own housekeeping |
 
@@ -129,10 +139,22 @@ process ends.
 
 The app executes only its own bundled JavaScript inside WebView2 (no `eval`,
 no remote code; CSP `script-src 'self'`). It never runs PowerShell, CMD,
-VBScript, JScript, HTA or batch files. The MSI has no script custom actions,
-which you can confirm in the `CustomAction` table in `inspection.txt`. The
-PowerShell under `scripts/windows/` is developer and CI tooling and isn't
-shipped.
+VBScript, JScript, HTA or batch files.
+
+The MSI's complete `CustomAction` table, observed in CI:
+
+| Action | Type | What it is |
+| --- | --- | --- |
+| `LaunchApplication` | 210 | The optional "Launch Soundwavian Field" checkbox on the final page; runs the installed exe |
+| `WixUIValidatePath`, `WixUIPrintEula` | 65 | WiX's standard UI helper DLL (install-folder validation, print button) |
+| `SetARPNOMODIFY`, `SetARPINSTALLLOCATION` | 51 | Set Add/Remove Programs properties |
+
+There are no script custom actions (types 5/6/21/22/37/38). The NSIS script
+(`dist/release/inspection/nsis-installer.nsi`) contains Tauri's WebView2
+download/bootstrap code only inside `!if` blocks that are compiled **out**
+for this project's install mode (`skip`). Its only `ExecWait`s are for
+uninstalling a previous version. The PowerShell under `scripts/windows/` is
+developer and CI tooling and isn't shipped.
 
 ## 10. Downloads after installation
 
