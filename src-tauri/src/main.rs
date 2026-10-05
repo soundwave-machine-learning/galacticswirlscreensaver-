@@ -50,6 +50,31 @@ static WINDOW_HANDLES: std::sync::Mutex<Vec<isize>> = std::sync::Mutex::new(Vec:
 static MODE: OnceLock<Mode> = OnceLock::new();
 static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
 
+/// Opt-in diagnostics for the release test. Only when the `SFIELD_TRACE`
+/// environment variable names a file are input-watcher and shutdown events
+/// appended to it (wall-clock milliseconds + message). Otherwise nothing is
+/// written anywhere.
+fn trace(msg: std::fmt::Arguments) {
+    static SINK: OnceLock<Option<std::sync::Mutex<std::fs::File>>> = OnceLock::new();
+    let sink = SINK.get_or_init(|| {
+        let path = std::env::var_os("SFIELD_TRACE")?;
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(path).ok()?;
+        Some(std::sync::Mutex::new(file))
+    });
+    if let Some(Ok(mut file)) = sink.as_ref().map(|f| f.lock()) {
+        use std::io::Write;
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let _ = writeln!(file, "{ms} {msg}");
+    }
+}
+
+macro_rules! trace {
+    ($($t:tt)*) => { trace(format_args!($($t)*)) };
+}
+
 fn invoked_as_scr() -> bool {
     std::env::current_exe()
         .ok()
@@ -89,6 +114,7 @@ fn shut_down(app: &AppHandle, code: i32) {
     if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
         return;
     }
+    trace!("shut_down code={code}");
     std::thread::spawn(move || {
         std::thread::sleep(EXIT_GRACE);
         #[cfg(windows)]
@@ -116,6 +142,7 @@ fn remember(_window: &tauri::WebviewWindow) {}
 
 #[tauri::command]
 fn exit_app(app: AppHandle) {
+    trace!("page requested exit");
     shut_down(&app, 0);
 }
 
@@ -258,7 +285,10 @@ fn watch_input(app: AppHandle) {
         let origin = win::cursor_pos();
         let mut prev_pos = origin;
         let mut prev_tick = win::last_input_tick();
+        trace!("watch_input start origin={origin:?} tick={prev_tick:?}");
+        let mut polls: u32 = 0;
         loop {
+            polls = polls.wrapping_add(1);
             std::thread::sleep(Duration::from_millis(50));
             let pos = win::cursor_pos();
             let tick = win::last_input_tick();
@@ -267,6 +297,9 @@ fn watch_input(app: AppHandle) {
                 _ => false,
             };
             let other_input = tick.is_some() && prev_tick.is_some() && tick != prev_tick && pos == prev_pos;
+            if tick != prev_tick || pos != prev_pos || polls % 40 == 0 {
+                trace!("poll {polls}: tick {prev_tick:?}->{tick:?} pos {prev_pos:?}->{pos:?} moved_far={moved_far} other_input={other_input}");
+            }
             if moved_far || other_input {
                 shut_down(&app, 0);
                 break;
@@ -313,6 +346,7 @@ fn main() {
     if mode == Mode::Exit {
         return;
     }
+    trace!("start {mode:?}");
     #[cfg(windows)]
     if let Mode::Preview(h) = mode {
         if !win::window_alive(h) {
@@ -339,6 +373,8 @@ fn main() {
                 Mode::Screensaver => {
                     open_screensaver(&handle)?;
                     #[cfg(windows)]
+                    trace!("screens open, hwnds={:?}", WINDOW_HANDLES.lock().map(|v| v.clone()).unwrap_or_default());
+                    #[cfg(windows)]
                     watch_input(handle.clone());
                 }
                 #[cfg(windows)]
@@ -360,9 +396,13 @@ fn main() {
                 return;
             }
             match event {
-                WindowEvent::Focused(true) => HAD_FOCUS.store(true, Ordering::SeqCst),
+                WindowEvent::Focused(true) => {
+                    trace!("screen0 focused");
+                    HAD_FOCUS.store(true, Ordering::SeqCst)
+                }
                 #[cfg(windows)]
                 WindowEvent::Focused(false) => {
+                    trace!("screen0 lost focus");
                     if !HAD_FOCUS.load(Ordering::SeqCst) {
                         return;
                     }
@@ -371,6 +411,7 @@ fn main() {
                         // Let focus settle before deciding.
                         std::thread::sleep(Duration::from_millis(400));
                         if !win::foreground_is_ours() {
+                            trace!("foreground taken by another process");
                             shut_down(&handle, EXIT_FOCUS_LOST);
                         }
                     });

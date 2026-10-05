@@ -111,9 +111,11 @@ function Compare-Set($before, $after) { @($after | Where-Object { $before -notco
 # CreateProcess semantics with an exact argument string - the way Windows
 # starts a screen saver. (Start-Process uses ShellExecute, whose "open" verb
 # for .scr files is `"%1" /S`, which would replace the arguments under test.)
-function Start-Direct([string] $file, [string] $arguments) {
+function Start-Direct([string] $file, [string] $arguments, [string] $tracePath) {
   $psi = [System.Diagnostics.ProcessStartInfo]::new($file, $arguments)
   $psi.UseShellExecute = $false
+  # Opt-in app diagnostics (input watcher + shutdown events), see main.rs trace().
+  if ($tracePath) { Remove-Item $tracePath -ErrorAction SilentlyContinue; $psi.EnvironmentVariables['SFIELD_TRACE'] = $tracePath }
   [System.Diagnostics.Process]::Start($psi)
 }
 
@@ -209,7 +211,8 @@ function Press-Key {
 # dismiss it with the given input and verify a prompt, complete exit.
 function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfile, [int] $seconds) {
   if ($coldProfile) { Remove-Item $profileDir -Recurse -Force -ErrorAction SilentlyContinue }
-  $proc = Start-Direct $scr '/s'
+  $tracePath = Join-Path $ReportDir "trace-$kind-$($label -replace '\W','-').txt"
+  $proc = Start-Direct $scr '/s' $tracePath
   $sockets = @(); $tree = @(); $shot = $null
   for ($i = 0; $i -lt $seconds; $i++) {
     Start-Sleep -Seconds 1
@@ -267,6 +270,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
       Start-Sleep -Milliseconds 50
     }
     $ok = $proc.HasExited
+    if ($inputAt) { Log "  input at unix ms $([DateTimeOffset]::new($inputAt).ToUnixTimeMilliseconds())$(if ($proc.HasExited) { "; process exit at unix ms $([DateTimeOffset]::new($proc.ExitTime).ToUnixTimeMilliseconds())" })" }
     if ($maxGap -gt 0.5) { Log ("  note: the test runner itself stalled for up to {0:N1} s between polls; latencies below use Windows' timestamps" -f $maxGap) }
     if ($ok) {
       $exitAfter = ($proc.ExitTime - $inputAt).TotalSeconds
@@ -284,6 +288,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     if ($ok) { Check ($secs -le 3) "$label`: process gone within 3 s of the input (detection + 1 s watchdog; took $secs s)" }
   }
   if (-not $proc.HasExited) { Stop-Process -Id $proc.Id }
+  if (Test-Path $tracePath) { Get-Content $tracePath | ForEach-Object { Log "    trace: $_" } }
   Test-Drained $tree $label
 }
 
