@@ -173,7 +173,14 @@ Notes:
 
 ## 9. Reboot
 
-- [ ] Restart Windows. *It boots normally, with no error dialogs.*
+Keep the screen saver *Wait* at 1 minute (section 3) for this section.
+
+- [ ] Restart Windows and sign in. **Don't type anything anywhere after signing in**, not in the Start menu, a
+  browser or any app; use only the mouse, or nothing at all. *It boots normally, with no error dialogs.*
+- [ ] **Cold-session keyboard exit.** Leave the PC untouched until the screen saver starts by itself, wait 3 s,
+  then press one letter key (don't move the mouse). *The screen comes back at once.* Record roughly how long it
+  took: instant / about 1 s / several seconds. (This is the one check CI couldn't pass on its virtual machines; see
+  the *Keyboard dismissal, cold session* row in [RELEASE.md](RELEASE.md#current-status).)
 - [ ] *Soundwavian Field does **not** start by itself after sign-in.*
 - [ ] Task Manager → **Startup apps**: *no Soundwavian Field entry.*
 - [ ] **Win+R** → `services.msc`: *no service with "Soundwavian" in its name.*
