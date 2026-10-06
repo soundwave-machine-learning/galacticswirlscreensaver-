@@ -92,8 +92,8 @@ tests pass, the security re-audit passes and the signing pipeline is prepared. N
 has been supplied, so nothing is signed yet. The physical Windows 10/11 validation hasn't been performed.
 
 Evidence comes from CI run
-[37388449324](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37388449324)
-on commit `bebee1dfdf8da220ff32c7df325aeb7d4f1ea84b`, the last commit that changes application or test code. Later
+[37391161263](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37391161263)
+on commit `24793664a0302526ccecdab68e42be5d38dd8f6a`, the last commit that changes application or test code. Later
 commits change documentation only, and every push re-runs the same workflow. Each attempt was a fresh
 `windows-latest` VM: Windows Server 2025 Datacenter 10.0.26100, WebView2 153.0.4234.48, software display adapter.
 These are **unsigned DEVELOPMENT** builds, and each attempt rebuilds the artifacts, so hashes differ between runs.
@@ -119,8 +119,8 @@ prerequisite exists · **NOT RUN** not performed yet. CI results never count as 
 | /c | PASS | opens "Soundwavian Field - Screen Saver Settings", closes cleanly in 0.3 s, no leftovers. Inside the real dialog: see *Screen Saver Settings button* |
 | /p | PASS | in a stand-in host window: child window created, field drawn (luma ≈71), exits 0.2 s after the host closes; `/p 0` and `/p 999999` exit. Inside the real dialog: see *Screen Saver dialog preview* |
 | /a | PASS | exits on its own |
-| Mouse dismissal | PASS | process gone 0.08–0.64 s after real cursor movement (cold profile and offline runs, both installers) |
-| Keyboard dismissal | PASS | injected key registered by Windows (last-input tick changed); process gone 0.11 s (setup.exe) and 0.77 s (MSI) after key-down, measured from Windows' input timestamp. Earlier runs failed this check; see hardening items 4, 7 and 8 |
+| Mouse dismissal | PASS | process gone 0.27–1.29 s after real cursor movement (cold-profile and offline runs, both installers); limit 1.5 s hand-back, 3 s exit |
+| Keyboard dismissal | PASS | injected key registered by Windows (last-input tick changed); process gone 0.18 s (setup.exe) and 1.11 s (MSI) after key-down, measured from Windows' input timestamp. Earlier runs failed this check (hardening items 4, 7, 8); the remaining CI variation is in process termination time |
 | First-launch behavior | PASS | `/s` and the app on a deleted (cold) WebView2 profile render and keep running until input |
 | Process termination | PASS | no process of the tree remains (PID-reuse-safe check) and no window remains after every mode |
 | MSI install | PASS | silent `msiexec` install, exit code 0; `.exe` and `.scr` present in `C:\Program Files\Soundwavian Field\` |
@@ -178,18 +178,26 @@ build be classified as *DISTRIBUTION READY*.
    measured from Windows' own input timestamp (`GetLastInputInfo`) and the process's exit time (`Process.ExitTime`,
    with a fallback when Windows doesn't report it). Runner stalls are logged. Thresholds are unchanged: 1.5 s
    hand-back, 3 s exit, 10 s drain.
-8. **Slow keyboard dismissal, root cause.** With exact timestamps the slowness was real: 3.6 s and 9.4 s from
+8. **Slow keyboard dismissal, measured and fixed.** With exact timestamps the slowness was real: 3.6 s and 9.4 s from
    key-down to exit (run [37383725710](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37383725710)),
    while mouse dismissal stayed under 1 s. An opt-in trace (`SFIELD_TRACE`, written only when the release test sets
-   it) showed the key was detected in about 110–220 ms. After that, though, a watchdog thread created at that moment
-   started late or not at all. A window-cloak call blocked for 2.1 s, and termination took up to 2.4 s
+   it) showed the key was detected within about 110–220 ms. After that, a watchdog thread created at that moment
+   started late or not at all, a window-cloak call blocked for 2.1 s, and termination took up to 2.4 s
    (runs [37385350139](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37385350139),
    [37386858463](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37386858463)).
-   The first keystroke into the in-process WebView2 window keeps the UI thread busy loading input components, and
-   any new thread has to wait for that. Fix (`bebee1d`): the watchdog thread is created at startup and parked, so
-   shutdown only wakes it. In `/s` mode, with nothing to save, it terminates the process immediately. Result in run
-   [37388449324](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37388449324):
-   keyboard 0.11–0.77 s and mouse 0.08–0.64 s from input to exit, on both installers.
+   The exact cause inside the process is **not determined**. A snapshot of loaded DLLs before and after the key
+   showed no new modules, so the hypothesis that the keystroke triggers DLL loading isn't confirmed.
+   - `bebee1d`: the watchdog thread is created at startup and parked, so shutdown only wakes it. In `/s` mode, with
+     nothing to save, it terminates the process immediately.
+   - `2479366`: `/s` no longer also starts the normal exit. Run
+     [37389815993](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37389815993)
+     showed that racing the termination. The dying process panicked ("failed to spawn thread"), and one keyboard
+     hand-back took 1.89 s.
+
+   Since then, run [37391161263](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37391161263)
+   measured keyboard 0.18–1.11 s and mouse 0.27–1.29 s from input to exit, on both installers. On these loaded CI
+   VMs the remaining variation is in how long Windows takes to finish terminating the process. Real hardware is
+   checked by the physical gate (§3).
 
 **Verdict:** don't call this publicly distribution-ready until it's built with `--signed` using your certificate and
 [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) passes on Windows 11 (and Windows 10 if available) for that

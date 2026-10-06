@@ -30,8 +30,8 @@ automated check for both installers. The details are in [docs/RELEASE.md](docs/R
 
 Observed on fresh `windows-latest` VMs (Windows Server 2025 Datacenter 10.0.26100, WebView2 153.0.4234.48, software
 display adapter), from CI run
-[37388449324](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37388449324) on
-commit `bebee1d`, the last commit that changed application or test code (later commits change documentation only).
+[37391161263](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37391161263) on
+commit `2479366`, the last commit that changed application or test code (later commits change documentation only).
 Both installers (MSI and setup.exe) were installed, exercised in `/a`, `/p`, `/c`, app, `/s` (mouse, keyboard,
 outbound-blocked) modes, and uninstalled. Earlier runs on `c91016c` and `64f3bec` showed the same results for every row
 below. The release gate with per-check evidence is in [docs/RELEASE.md](docs/RELEASE.md#current-status).
@@ -60,7 +60,7 @@ The two columns describe different things. **Soundwavian Field** is what this ap
 | Packers / compressors | No executable packer (no UPX or similar step in the pipeline). Observed PE sections: `.text .rdata .data .pdata .rsrc .reloc` only. Installer payloads use the formats' standard MSI cabinet / NSIS LZMA compression | — |
 | Imported DLLs | Observed (dumpbin): 23 Windows system DLLs only, e.g. `kernel32`, `user32`, `gdi32`, `dwmapi`, `advapi32`, `ole32`, `shell32`, `api-ms-win-crt-*`. No networking DLL (`ws2_32`, `winhttp`, `wininet`) is imported | — |
 | Offline operation | Observed: with outbound traffic blocked by Windows Firewall for the app **and** every `msedgewebview2.exe`, `/s` rendered, opened 0 sockets and exited on input | — |
-| Process exit | Observed: the process is gone 0.08–0.77 s after mouse or keyboard input. In `/s` mode a watchdog thread, created at startup, ends the process with `TerminateProcess` as soon as input is detected; other modes get 1 s to close normally first | Helpers drain within 0.5–3.2 s (observed) |
+| Process exit | Observed: the process is gone 0.18–1.29 s after mouse or keyboard input. In `/s` mode a watchdog thread, created at startup, ends the process with `TerminateProcess` as soon as input is detected; other modes get 1 s to close normally first | Helpers drain within 0.5–2.7 s (observed) |
 | Updater | **None** | — |
 | Analytics / telemetry | **None.** The offline audit fails on telemetry APIs. *Copy Diagnostics* writes only to the local clipboard on a user keypress | Windows diagnostic-data settings apply to the OS, not to this app |
 | Defender | Observed: MpCmdRun custom scan, "no threats found in 4 files" (setup.exe, MSI, `.scr`, `.exe`), threat count 0. One engine's result on CI signatures, not a guarantee about other engines | Defender is part of Windows |

@@ -100,10 +100,10 @@ fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
 
 /// The watchdog thread is started with the program, long before any input,
 /// and parked on a channel. Creating a thread at shutdown time was not
-/// reliable: in testing, the first keystroke into the WebView2 window kept
-/// the UI thread loading input DLLs (under the loader lock, which every new
-/// thread needs) for seconds, so a watchdog spawned then started late or
-/// not at all. Waking a parked thread needs no lock of that kind.
+/// reliable: in release testing, right after a keystroke into the WebView2
+/// window, a newly spawned watchdog started seconds late or not at all
+/// (cause inside the process not determined). Waking a thread that already
+/// exists doesn't depend on thread creation.
 static WATCHDOG: OnceLock<std::sync::mpsc::Sender<(Duration, i32)>> = OnceLock::new();
 
 fn start_watchdog() {
