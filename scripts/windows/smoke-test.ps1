@@ -457,6 +457,15 @@ Log "`n[8] /s first launch (cold WebView2 profile), mouse dismissal"
 Test-ScreenSaver '/s first launch' 'mouse' $true $RunSeconds
 
 Log "`n[9] /s keyboard dismissal"
+# On a fresh CI VM nothing has typed since boot. The very first keystroke of
+# the session was repeatedly followed by 1-2.6 s of process teardown (only in
+# whichever test ran first), which a real user session - signed in with the
+# keyboard long before the screen saver starts - never presents. Prime the
+# session with one Shift press while no screen saver runs, so the measurement
+# is of the screen saver rather than of first-keystroke session setup.
+[SField.Native]::keybd_event(0x10, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60
+[SField.Native]::keybd_event(0x10, 0, 2, [UIntPtr]::Zero); Start-Sleep -Seconds 3
+Log "  session keyboard primed with one Shift press (no screen saver running)"
 Test-ScreenSaver '/s keyboard' 'keyboard' $false 10
 
 Log "`n[10] /s with outbound network blocked for the app and WebView2"
