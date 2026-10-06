@@ -204,11 +204,18 @@ function Wait-WindowTitle($proc, [string] $pattern, [int] $seconds) {
 
 # Returns when Windows registered the key-down, from the session's own input
 # timestamp, so a stalled test runner can't distort the measured latency.
-function Press-Key {
-  [SField.Native]::keybd_event(0x41, 0, 0, [UIntPtr]::Zero)   # 'A' down
+# Also records in $script:keyGapMs how long after the key-down Windows
+# registered the key-up (sent 60 ms later); far more than that means input
+# processing stalled on this machine.
+function Press-Key([byte] $vk = 0x41) {
+  $prevTick = [SField.Native]::LastInputTick()
+  [SField.Native]::keybd_event($vk, 0, 0, [UIntPtr]::Zero)   # down ('A' by default)
+  $downTick = [SField.Native]::LastInputTick()
   $downAt = [DateTime]::Now.AddMilliseconds(-[double][SField.Native]::MsSinceLastInput())
   Start-Sleep -Milliseconds 60
-  [SField.Native]::keybd_event(0x41, 0, 2, [UIntPtr]::Zero)   # 'A' up
+  [SField.Native]::keybd_event($vk, 0, 2, [UIntPtr]::Zero)   # up
+  # (-1: the key-down itself was not registered yet when read back)
+  $script:keyGapMs = if ($downTick -ne $prevTick) { [long][SField.Native]::LastInputTick() - [long]$downTick } else { -1 }
   return $downAt
 }
 
@@ -270,7 +277,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
         $tickAfter = [SField.Native]::LastInputTick()
         $newMods = @($modsAfter | Where-Object { $modsBefore -notcontains $_ })
         Log "  modules loaded after the key: $(if (-not $modsAfter.Count) { '(not readable - process already ending)' } elseif ($newMods.Count) { $newMods -join ', ' } else { 'none' }) (before: $($modsBefore.Count))"
-        Log "  injected key: last-input tick $tickBefore -> $tickAfter ($(if ($tickAfter -ne $tickBefore) { 'registered by Windows' } else { 'NOT registered - synthetic input did not reach this session' }))"
+        Log "  injected key: last-input tick $tickBefore -> $tickAfter ($(if ($tickAfter -ne $tickBefore) { 'registered by Windows' } else { 'NOT registered - synthetic input did not reach this session' })); key-up registered $script:keyGapMs ms after key-down"
       }
       $proc.Refresh()
       # Handed back = hidden, cloaked by DWM (off screen at composition level), or exited.
@@ -452,6 +459,16 @@ $aTree = Get-ProcessTree $proc.Id
 Test-ChildNames $aTree 'app'
 $aSockets = @(Get-TreeSockets $aTree)
 Check ($aSockets.Count -eq 0) "app: no network sockets $(if ($aSockets.Count) { '-> ' + ($aSockets -join '; ') })"
+# Keyboard into the app window: D toggles the stats overlay (twice = back off).
+# The key-up lag shows whether this session stalls on its first keystrokes
+# into a WebView2 window (observed before the /s keyboard test on fresh VMs).
+foreach ($n in 1, 2) {
+  $fg = [SField.Native]::ForegroundPid()
+  [void](Press-Key 0x44)
+  Log "  app: key D #$n (foreground pid $fg$(if ($fg -eq $proc.Id) { ', the app' })) - key-up registered $script:keyGapMs ms after key-down"
+  Start-Sleep -Seconds 2
+}
+Check (-not $proc.HasExited) 'app keeps running after keyboard input'
 [void]$proc.CloseMainWindow()
 $closed = $proc.WaitForExit(10000)
 Check $closed 'app exits when its window is closed'
