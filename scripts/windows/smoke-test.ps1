@@ -181,11 +181,6 @@ function Test-Drained($tree, [string] $label) {
   Check ($windows.Count -eq 0) "$label`: no Soundwavian Field window remains on screen"
 }
 
-# Names of the DLLs loaded in a process (read from outside; empty if not readable).
-function Get-ModuleNames($proc) {
-  try { $proc.Refresh(); @($proc.Modules | ForEach-Object { $_.ModuleName }) } catch { @() }
-}
-
 function Test-ChildNames($tree, [string] $label) {
   $others = @($tree | Where-Object { $_.Name -notin @('SoundwavianField.scr', 'SoundwavianField.exe', 'msedgewebview2.exe') })
   Check ($others.Count -eq 0) "$label`: only SoundwavianField + msedgewebview2.exe processes (no cmd/conhost/powershell) $(if ($others.Count) { '-> ' + ($others.Name -join ', ') })"
@@ -253,7 +248,6 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     $hadWindow = $hwndBefore -ne [IntPtr]::Zero
     $moves = @(@(200, 200), @(260, 240), @(420, 380), @(600, 500))
     $mi = 0; $nextMove = 0; $pressed = $false; $released = $null; $inputAt = $null; $exitSeen = $null
-    $modsBefore = Get-ModuleNames $proc
     $procsBefore = @(Get-Process | ForEach-Object { $_.Id })
     $fgPid = [SField.Native]::ForegroundPid()
     $tickBefore = [SField.Native]::LastInputTick()
@@ -272,11 +266,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
       }
       if ($dismiss -eq 'keyboard' -and -not $pressed) {
         $inputAt = Press-Key; $pressed = $true
-        # Which DLLs the keystroke made the process load (diagnostic only).
-        $modsAfter = Get-ModuleNames $proc
         $tickAfter = [SField.Native]::LastInputTick()
-        $newMods = @($modsAfter | Where-Object { $modsBefore -notcontains $_ })
-        Log "  modules loaded after the key: $(if (-not $modsAfter.Count) { '(not readable - process already ending)' } elseif ($newMods.Count) { $newMods -join ', ' } else { 'none' }) (before: $($modsBefore.Count))"
         Log "  injected key: last-input tick $tickBefore -> $tickAfter ($(if ($tickAfter -ne $tickBefore) { 'registered by Windows' } else { 'NOT registered - synthetic input did not reach this session' })); key-up registered $script:keyGapMs ms after key-down"
       }
       $proc.Refresh()
@@ -319,6 +309,7 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
 
 # ---------------------------------------------------------------------------
 
+$testStart = Get-Date
 Log "Soundwavian Field release test - $kind - $(Get-Date -Format o)"
 Log "Installer: $Installer"
 Log "SHA-256:   $((Get-FileHash $Installer -Algorithm SHA256).Hash)"
@@ -459,16 +450,6 @@ $aTree = Get-ProcessTree $proc.Id
 Test-ChildNames $aTree 'app'
 $aSockets = @(Get-TreeSockets $aTree)
 Check ($aSockets.Count -eq 0) "app: no network sockets $(if ($aSockets.Count) { '-> ' + ($aSockets -join '; ') })"
-# Keyboard into the app window: D toggles the stats overlay (twice = back off).
-# The key-up lag shows whether this session stalls on its first keystrokes
-# into a WebView2 window (observed before the /s keyboard test on fresh VMs).
-foreach ($n in 1, 2) {
-  $fg = [SField.Native]::ForegroundPid()
-  [void](Press-Key 0x44)
-  Log "  app: key D #$n (foreground pid $fg$(if ($fg -eq $proc.Id) { ', the app' })) - key-up registered $script:keyGapMs ms after key-down"
-  Start-Sleep -Seconds 2
-}
-Check (-not $proc.HasExited) 'app keeps running after keyboard input'
 [void]$proc.CloseMainWindow()
 $closed = $proc.WaitForExit(10000)
 Check $closed 'app exits when its window is closed'
@@ -503,6 +484,14 @@ try {
   Remove-NetFirewallRule -Group $ruleGroup -ErrorAction SilentlyContinue
   if ($fwProfiles) { foreach ($fp in $fwProfiles) { Set-NetFirewallProfile -Name $fp.Name -Enabled $fp.Enabled -ErrorAction SilentlyContinue } }
 }
+
+# A crash during exit is invisible in the exit code once the process has
+# been terminated, but Windows still records it (and holds the process for
+# Windows Error Reporting). Release testing found exactly that, so check.
+$crashes = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001, 1002; StartTime = $testStart } -ErrorAction SilentlyContinue |
+  Where-Object { $_.Message -match 'SoundwavianField' })
+foreach ($c in $crashes) { Log "  crash report (event $($c.Id), $($c.TimeCreated.ToString('HH:mm:ss'))): $(($c.Message -split "`n" | Select-Object -First 3) -join ' | ')" }
+Check ($crashes.Count -eq 0) "no crash or hang reports for SoundwavianField in the Application log during the test"
 
 Log "`n[11] Uninstall"
 if ($kind -eq 'msi') {

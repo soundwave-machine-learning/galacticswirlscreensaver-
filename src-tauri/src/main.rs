@@ -106,19 +106,35 @@ fn save_settings(app: AppHandle, json: String) -> Result<(), String> {
 /// exists doesn't depend on thread creation.
 static WATCHDOG: OnceLock<std::sync::mpsc::Sender<(Duration, i32)>> = OnceLock::new();
 
+/// Starts a background thread and never panics. `std::thread::spawn` panics
+/// when Windows refuses a new thread, which it does once the process is
+/// being terminated. With `panic = "abort"` that turns a normal exit into a
+/// crash that Windows Error Reporting then handles. Release testing caught
+/// exactly that: the focus-lost handler below spawned a thread during
+/// termination, and the process took up to 20 s to disappear.
+fn spawn_background<F: FnOnce() + Send + 'static>(f: F) -> bool {
+    std::thread::Builder::new().spawn(f).is_ok()
+}
+
+fn end_process(code: i32) -> ! {
+    #[cfg(windows)]
+    win::terminate_now(code);
+    #[cfg(not(windows))]
+    std::process::exit(code)
+}
+
 fn start_watchdog() {
     let (tx, rx) = std::sync::mpsc::channel::<(Duration, i32)>();
-    std::thread::spawn(move || {
+    let started = spawn_background(move || {
         if let Ok((grace, code)) = rx.recv() {
             std::thread::sleep(grace);
             trace!("watchdog: terminating");
-            #[cfg(windows)]
-            win::terminate_now(code);
-            #[cfg(not(windows))]
-            std::process::exit(code);
+            end_process(code);
         }
     });
-    let _ = WATCHDOG.set(tx);
+    if started {
+        let _ = WATCHDOG.set(tx);
+    }
 }
 
 /// Ends the program. Order matters, and every step is non-blocking:
@@ -139,14 +155,13 @@ fn shut_down(app: &AppHandle, code: i32) {
     trace!("shut_down code={code}");
     let screensaver = matches!(MODE.get(), Some(Mode::Screensaver));
     let grace = if screensaver { Duration::ZERO } else { EXIT_GRACE };
-    if !WATCHDOG.get().is_some_and(|tx| tx.send((grace, code)).is_ok()) {
-        std::thread::spawn(move || {
+    if !WATCHDOG.get().is_some_and(|tx| tx.send((grace, code)).is_ok())
+        && !spawn_background(move || {
             std::thread::sleep(grace);
-            #[cfg(windows)]
-            win::terminate_now(code);
-            #[cfg(not(windows))]
-            std::process::exit(code);
-        });
+            end_process(code);
+        })
+    {
+        end_process(code);
     }
     #[cfg(windows)]
     for raw in WINDOW_HANDLES.lock().map(|v| v.clone()).unwrap_or_default() {
@@ -311,7 +326,7 @@ fn open_screensaver(app: &AppHandle) -> tauri::Result<()> {
 #[cfg(windows)]
 fn watch_input(app: AppHandle) {
     const MOVE_THRESHOLD: i32 = 10;
-    std::thread::spawn(move || {
+    spawn_background(move || {
         // Ignore the input that triggered launch / window creation jitter.
         std::thread::sleep(Duration::from_millis(1000));
         let origin = win::cursor_pos();
@@ -360,7 +375,7 @@ fn open_preview(app: &AppHandle, parent: isize) -> tauri::Result<()> {
 
     // The preview must never outlive the dialog that hosts it.
     let handle = app.clone();
-    std::thread::spawn(move || loop {
+    spawn_background(move || loop {
         std::thread::sleep(Duration::from_millis(400));
         if !win::window_alive(parent) {
             shut_down(&handle, 0);
@@ -436,11 +451,12 @@ fn main() {
                 #[cfg(windows)]
                 WindowEvent::Focused(false) => {
                     trace!("screen0 lost focus");
-                    if !HAD_FOCUS.load(Ordering::SeqCst) {
+                    // Losing focus is expected while the process is ending.
+                    if !HAD_FOCUS.load(Ordering::SeqCst) || SHUTTING_DOWN.load(Ordering::SeqCst) {
                         return;
                     }
                     let handle = window.app_handle().clone();
-                    std::thread::spawn(move || {
+                    spawn_background(move || {
                         // Let focus settle before deciding.
                         std::thread::sleep(Duration::from_millis(400));
                         if !win::foreground_is_ours() {
