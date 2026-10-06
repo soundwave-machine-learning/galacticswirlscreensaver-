@@ -42,6 +42,9 @@ const EXIT_FOCUS_LOST: i32 = 2;
 /// Longest a dismissed program may take to shut down cleanly before the
 /// watchdog ends the process.
 const EXIT_GRACE: Duration = Duration::from_millis(1000);
+/// The same for the screen saver, which has nothing to save and must hand
+/// the screen back at once.
+const SCREENSAVER_EXIT_GRACE: Duration = Duration::from_millis(500);
 
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
@@ -140,21 +143,24 @@ fn start_watchdog() {
 /// Ends the program. Order matters, and every step is non-blocking:
 ///  1. Only the first caller proceeds (input can be detected by the page and
 ///     by the native watcher at the same moment).
-///  2. The pre-started watchdog is triggered before anything else. As a
-///     screen saver there is nothing to save, so the process is terminated
-///     at once; other modes get `EXIT_GRACE` to close normally. Termination
-///     skips CRT/DLL teardown, which is what stalled in testing.
+///  2. The pre-started watchdog is triggered before anything else: if the
+///     normal exit hasn't finished within the grace period (0.5 s as a
+///     screen saver, 1 s otherwise), it terminates the process outright.
 ///  3. Windows are cloaked through DWM and hidden with ShowWindowAsync, on
-///     handles recorded at creation, without waiting on the UI thread.
-///  4. Other modes run the normal shutdown. In every mode the WebView2 helper
-///     processes notice the host is gone and close themselves.
+///     handles recorded at creation, without waiting on the UI thread, so
+///     the screen is handed back at once even if teardown is slow.
+///  4. The normal exit runs. The WebView2 helper processes close with it,
+///     or notice the host is gone if the watchdog had to end it.
 fn shut_down(app: &AppHandle, code: i32) {
     if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
         return;
     }
     trace!("shut_down code={code}");
-    let screensaver = matches!(MODE.get(), Some(Mode::Screensaver));
-    let grace = if screensaver { Duration::ZERO } else { EXIT_GRACE };
+    let grace = if matches!(MODE.get(), Some(Mode::Screensaver)) {
+        SCREENSAVER_EXIT_GRACE
+    } else {
+        EXIT_GRACE
+    };
     if !WATCHDOG.get().is_some_and(|tx| tx.send((grace, code)).is_ok())
         && !spawn_background(move || {
             std::thread::sleep(grace);
@@ -168,12 +174,8 @@ fn shut_down(app: &AppHandle, code: i32) {
         win::hide_now(raw);
     }
     trace!("windows cloaked");
-    // A screen saver is terminated by the watchdog right away; starting the
-    // normal exit as well would only race it.
-    if !screensaver {
-        app.exit(code);
-        trace!("exit requested");
-    }
+    app.exit(code);
+    trace!("exit requested");
 }
 
 /// Records a window's native handle so shutdown can hide it without going
