@@ -131,6 +131,8 @@ fn end_process(code: i32) -> ! {
 fn start_watchdog() {
     let (tx, rx) = std::sync::mpsc::channel::<(Duration, i32)>();
     let started = spawn_background(move || {
+        #[cfg(windows)]
+        win::raise_thread_priority();
         if let Ok((grace, code)) = rx.recv() {
             std::thread::sleep(grace);
             trace!("watchdog: terminating");
@@ -330,6 +332,7 @@ fn open_screensaver(app: &AppHandle) -> tauri::Result<()> {
 fn watch_input(app: AppHandle) {
     const MOVE_THRESHOLD: i32 = 10;
     spawn_background(move || {
+        win::raise_thread_priority();
         // Ignore the input that triggered launch / window creation jitter.
         std::thread::sleep(Duration::from_millis(1000));
         let origin = win::cursor_pos();
@@ -404,6 +407,10 @@ fn main() {
         }
     }
     let _ = MODE.set(mode);
+    #[cfg(windows)]
+    if mode == Mode::Screensaver {
+        win::raise_process_priority();
+    }
     start_watchdog();
 
     tauri::Builder::default()

@@ -11,7 +11,10 @@ use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_S
 use windows::core::BOOL;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CLOAK};
-use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, GetCurrentThread, SetPriorityClass, SetThreadPriority, TerminateProcess,
+    ABOVE_NORMAL_PRIORITY_CLASS, THREAD_PRIORITY_HIGHEST,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsWindow, ShowWindowAsync,
@@ -57,6 +60,25 @@ pub fn hide_now(raw: isize) {
             std::mem::size_of::<BOOL>() as u32,
         );
         let _ = ShowWindowAsync(hwnd(raw), SW_HIDE);
+    }
+}
+
+/// Screen saver only: keeps this small host process responsive to input
+/// while the WebView2 renderer saturates the CPU (software rendering, as on
+/// machines or VMs without GPU acceleration - release testing saw a 0.1 s
+/// sleep overrun to 6.7 s). The class is not inherited by the WebView2
+/// processes, so rendering keeps normal priority.
+pub fn raise_process_priority() {
+    unsafe {
+        let _ = SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+    }
+}
+
+/// Raises the calling thread (the input watcher and the shutdown watchdog,
+/// which sleep almost all the time) above the rest of the process.
+pub fn raise_thread_priority() {
+    unsafe {
+        let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
     }
 }
 
