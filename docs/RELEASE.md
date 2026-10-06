@@ -87,19 +87,17 @@ release is public, you can **manually** improve or check its reputation:
 
 ## Current status
 
-**Version 0.1.0. Classification: RELEASE CANDIDATE.** The application is complete, the security re-audit passes,
-the signing pipeline is prepared and the automated Windows release test is green. One automated check still fails,
-though: keyboard dismissal in a *cold* session, the first keystroke into any WebView2 window since boot (see the
-*Keyboard dismissal, cold session* row). That keeps the build below READY FOR SIGNING. No production code-signing
-certificate has been supplied, and the physical Windows 10/11 validation hasn't been performed.
+**Version 0.1.0. Classification: READY FOR SIGNING.** The application is complete, the automated Windows release
+tests pass, the security re-audit passes and the signing pipeline is prepared. No production code-signing
+certificate has been supplied, so nothing is signed yet. The physical Windows 10/11 validation hasn't been performed.
 
-Evidence comes from CI run
-[37396188157](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37396188157)
-on commit `869dd7bb0abfd4a390299f8fb8b70fd5256866c6`, the last commit that changes application or test code. Later
-commits change documentation only, and every push re-runs the same workflow. Each attempt was a fresh
-`windows-latest` VM: Windows Server 2025 Datacenter 10.0.26100, WebView2 153.0.4234.48, software display adapter.
-These are **unsigned DEVELOPMENT** builds, and each attempt rebuilds the artifacts, so hashes differ between runs.
-Always compare against that build's own `SHA256SUMS.txt`.
+Evidence comes from CI run [37403856958](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37403856958) on commit
+`27e9b61733a036d1175dd31b64064ba0ea63f6b2`, the last commit that changes application code. The commit after it
+changes the release test's mouse timestamp, which can only make that measurement stricter, and documentation. Its
+own CI run is the final check. Each attempt was a fresh `windows-latest` VM: Windows Server 2025 Datacenter
+10.0.26100, WebView2 153.0.4234.48, software display adapter. These are **unsigned DEVELOPMENT** builds, and each
+attempt rebuilds the artifacts, so hashes differ between runs. Always compare against that build's own
+`SHA256SUMS.txt`.
 
 Statuses: **PASS** observed and correct · **FAIL** observed and wrong · **BLOCKED** can't be done until a
 prerequisite exists · **NOT RUN** not performed yet. CI results never count as physical results.
@@ -118,12 +116,13 @@ prerequisite exists · **NOT RUN** not performed yet. CI results never count as 
 | Publisher identity | PASS | CompanyName and copyright "Soundwave Machine Learning"; no placeholder text (asserted). Must still match the certificate subject when signing |
 | Screensaver display name | PASS | string resource 1 = "Soundwavian Field" (asserted) |
 | /s | PASS | renders full screen (mean luma ≈76), keeps running; only `SoundwavianField` + `msedgewebview2.exe` processes |
-| /c | PASS | opens "Soundwavian Field - Screen Saver Settings", closes cleanly in 0.3–0.4 s, no leftovers. Inside the real dialog: see *Screen Saver Settings button* |
-| /p | PASS | in a stand-in host window: child window created, field drawn (luma ≈71), exits 0.1 s after the host closes; `/p 0` and `/p 999999` exit. Inside the real dialog: see *Screen Saver dialog preview* |
+| /c | PASS | opens "Soundwavian Field - Screen Saver Settings", closes cleanly in 0.2 s, no leftovers. Inside the real dialog: see *Screen Saver Settings button* |
+| /p | PASS | in a stand-in host window: child window created, field drawn (luma ≈71), exits 0.1–0.2 s after the host closes; `/p 0` and `/p 999999` exit. Inside the real dialog: see *Screen Saver dialog preview* |
 | /a | PASS | exits on its own |
-| Mouse dismissal | PASS | process gone 0.06–0.50 s after real cursor movement (cold-profile and offline runs, both installers); limits 1.5 s hand-back, 3 s exit |
-| Keyboard dismissal | PASS | in a session where a WebView2 window has already had keyboard input (the test types D into the app first): process gone 0.14 s (MSI) and 0.03 s (setup.exe) after key-down, measured from Windows' input timestamp |
-| Keyboard dismissal, cold session | FAIL | first keystroke into any WebView2 window since boot, ending the screen saver. On six fresh CI VMs: 0.77, 1.89, 1.11, 2.63, 5.01 and 3.86 s from key-down to exit (runs [37388449324](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37388449324), [37389815993](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37389815993), [37391161263](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37391161263), [37392425603](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37392425603), [37393685918](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37393685918), [37394965804](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37394965804)), over the 1.5 s hand-back limit in 4 of 6. Detection takes 0.1–0.45 s; the rest is the process being unable to run or finish terminating (cause not determined). Not yet checked on real hardware: physical gate §9 |
+| Mouse dismissal | PASS | process gone 0.14–0.57 s after real cursor movement (cold-profile and offline runs, both installers); limits 1.5 s hand-back, 3 s exit |
+| Keyboard dismissal | PASS | injected key registered by Windows (last-input tick changed); process gone 0.12 s (MSI) and 0.19 s (setup.exe) after key-down, measured from Windows' input timestamp |
+| Keyboard dismissal, cold session | PASS | the MSI test's keyboard case is the VM's first keystroke into any WebView2 window since boot (no priming): 0.12 s. Before the fixes in hardening item 9 it failed in 4 of 6 runs (0.77–5.01 s) |
+| No crash on exit | PASS | no Application Error / WER / hang events (1000/1001/1002) for SoundwavianField during either installer's test |
 | First-launch behavior | PASS | `/s` and the app on a deleted (cold) WebView2 profile render and keep running until input |
 | Process termination | PASS | no process of the tree remains (PID-reuse-safe check) and no window remains after every mode |
 | MSI install | PASS | silent `msiexec` install, exit code 0; `.exe` and `.scr` present in `C:\Program Files\Soundwavian Field\` |
@@ -153,15 +152,9 @@ prerequisite exists · **NOT RUN** not performed yet. CI results never count as 
 | Real hardware FPS | NOT RUN | physical gate §6 (**D** overlay average per preset) |
 | Real hardware minimum FPS | NOT RUN | physical gate §6 (**D** overlay minimum per preset) |
 
-**Remaining blockers:**
-
-1. Keyboard dismissal in a cold session (FAIL above). Check it on a real Windows 11 PC first (physical gate §9). If
-   it reproduces there, it needs a fix before signing; if it doesn't, it's an artefact of the CI VMs, and the row
-   can be re-assessed with that evidence.
-2. A production code-signing certificate, then a `signed: true` build that verifies.
-3. The physical gate on Windows 11 (and Windows 10 if available) for that signed build.
-
-Only after all three may a build be classified as *DISTRIBUTION READY*.
+**Remaining blockers:** (1) a production code-signing certificate, then a `signed: true` build that verifies;
+(2) the physical gate on Windows 11 (and Windows 10 if available) for that signed build. Only after both may a
+build be classified as *DISTRIBUTION READY*.
 
 ### Fixed in the hardening pass (verified in CI)
 
@@ -187,39 +180,41 @@ Only after all three may a build be classified as *DISTRIBUTION READY*.
    measured from Windows' own input timestamp (`GetLastInputInfo`) and the process's exit time (`Process.ExitTime`,
    with a fallback when Windows doesn't report it). Runner stalls are logged. Thresholds are unchanged: 1.5 s
    hand-back, 3 s exit, 10 s drain.
-8. **Slow keyboard dismissal, measured and fixed.** With exact timestamps the slowness was real: 3.6 s and 9.4 s from
-   key-down to exit (run [37383725710](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37383725710)),
-   while mouse dismissal stayed under 1 s. An opt-in trace (`SFIELD_TRACE`, written only when the release test sets
-   it) showed the key was detected within about 110–220 ms. After that, a watchdog thread created at that moment
-   started late or not at all, a window-cloak call blocked for 2.1 s, and termination took up to 2.4 s
-   (runs [37385350139](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37385350139),
-   [37386858463](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37386858463)).
-   The exact cause inside the process is **not determined**. A snapshot of loaded DLLs before and after the key
-   showed no new modules, so the hypothesis that the keystroke triggers DLL loading isn't confirmed.
-   - `bebee1d`: the watchdog thread is created at startup and parked, so shutdown only wakes it. In `/s` mode, with
-     nothing to save, it terminates the process immediately.
-   - `2479366`: `/s` no longer also starts the normal exit. Run
-     [37389815993](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37389815993)
-     showed that racing the termination. The dying process panicked ("failed to spawn thread"), and one keyboard
-     hand-back took 1.89 s.
+8. **Slow dismissal: investigation.** With exact timestamps the slowness was real: 3.6 s and 9.4 s from key-down
+   to exit (run [37383725710](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37383725710)). An opt-in trace (`SFIELD_TRACE`, written only when the release
+   test sets it) showed input was always detected within about 0.05–0.45 s. After that, though, the process often
+   couldn't run or finish ending: a newly created watchdog started late, sleeps overran by seconds, and
+   termination took up to 20 s. Hypotheses that were tested and **ruled out**:
+   - DLL loading triggered by the keystroke: the module list didn't change;
+   - first-keystroke session setup: priming the session didn't help;
+   - another process starting: none appeared.
 
-   Since then, run [37391161263](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37391161263)
-   measured keyboard 0.18–1.11 s and mouse 0.27–1.29 s from input to exit, on both installers. On these loaded CI
-   VMs the remaining variation is in how long Windows takes to finish terminating the process. Real hardware is
-   checked by the physical gate (§3).
+   Intermediate changes along the way:
+   - `bebee1d`: watchdog thread created at startup;
+   - `2479366`: no normal exit racing the termination;
+   - `0360a06`: a trial of the normal exit plus a 0.5 s backstop, measured worse for keyboard and reverted in
+     `0b9c04d`.
+9. **Slow dismissal: the two root causes, fixed.**
+   - **Crash during exit** (`1db994f`). Once termination began, the window received focus-lost. Its handler
+     started a thread, which Windows refuses in a terminating process. `std::thread::spawn` panics on that, and
+     with `panic = "abort"` the panic became a crash. Windows Error Reporting then handled the crash, holding the
+     process for seconds (20 s in run [37397456290](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37397456290), which printed "failed to spawn thread:
+     Access is denied"). Fix: no thread start can panic, and the focus handler does nothing once shutdown has
+     begun. The release test now also fails on any crash or hang report (Application log events 1000/1001/1002)
+     for SoundwavianField, since the exit code didn't show these crashes.
+   - **CPU starvation** (`27e9b61`). The CI runners have no GPU, so WebView2 renders the field in software on
+     every vCPU. The host's input-watcher and watchdog threads, at the same priority, couldn't get scheduled: in
+     run [37402706349](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37402706349) a 0.1 s sleep overran to 6.7 s, and the test runner itself stalled
+     for 6.8 s. Machines without GPU acceleration (VMs, remote sessions, old hardware) are in the same position.
+     Fix: in `/s` mode the host process runs at above-normal priority, which the WebView2 rendering processes
+     don't inherit, and the two threads at highest priority. The screen saver now cloaks its windows and is
+     terminated 0.1 s later (`0b9c04d`).
 
-9. **Cold-session keyboard dismissal (open).** After the fixes above, the keyboard case was slow only in whichever
-   test sent the VM's first keystroke into a WebView2 window: always the MSI test, which runs first. The setup.exe
-   test on the same VM measured 0.03–0.22 s in every run. What was ruled out:
-   - pressing Shift into the test console first didn't help (run [37393685918](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37393685918), 5.01 s);
-   - no new process starts around the input (run [37394965804](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37394965804));
-   - the keystroke loads no new DLLs into the process (run [37391161263](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37391161263)).
-
-   Typing two keys into the app window first made the MSI case fast (0.14 s, run
-   [37396188157](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37396188157)). The key-up lag on those first app keystrokes was only 110–125 ms, so input
-   itself isn't frozen; the delay appears when the process then ends. The release test now includes those app
-   keystrokes, which also cover keyboard handling in app mode. The cold case is kept as a separate FAIL row rather
-   than hidden by the test order.
+   After both fixes, run [37403856958](https://github.com/soundwave-machine-learning/galacticswirlscreensaver-/actions/runs/37403856958) measured the watchdog firing 100–101 ms after
+   detection every time. Process exit took 0.12–0.57 s after input, including the MSI test's keyboard case, which
+   is the VM's first keystroke into a WebView2 window. No crash reports were logged. The test no longer primes the
+   session, and mouse latency is now timed from just before the move, so it can't read too low; one reading had
+   come out at -0.05 s.
 
 **Verdict:** don't call this publicly distribution-ready until it's built with `--signed` using your certificate and
 [PHYSICAL_WINDOWS_GATE.md](PHYSICAL_WINDOWS_GATE.md) passes on Windows 11 (and Windows 10 if available) for that

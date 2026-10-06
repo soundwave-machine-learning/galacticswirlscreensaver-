@@ -260,9 +260,10 @@ function Test-ScreenSaver([string] $label, [string] $dismiss, [bool] $coldProfil
     while ($sw.Elapsed.TotalSeconds -lt 15) {
       $t = $sw.Elapsed.TotalSeconds; $maxGap = [math]::Max($maxGap, $t - $lastIter); $lastIter = $t
       if ($dismiss -eq 'mouse' -and $mi -lt $moves.Count -and $sw.ElapsedMilliseconds -ge $nextMove) {
-        # (Cursor moves don't update the last-input time, so time the first move here.)
-        [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($moves[$mi][0], $moves[$mi][1]); $mi++; $nextMove += 400
+        # Cursor moves don't update the last-input time, so time the first move
+        # here - just before it, so the measured latency is never too small.
         if ($null -eq $inputAt) { $inputAt = [DateTime]::Now }
+        [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($moves[$mi][0], $moves[$mi][1]); $mi++; $nextMove += 400
       }
       if ($dismiss -eq 'keyboard' -and -not $pressed) {
         $inputAt = Press-Key; $pressed = $true
